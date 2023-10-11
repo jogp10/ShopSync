@@ -16,33 +16,33 @@ def create_shopping_list(name):
         'name': name,
         'items': [],
     }
-    with open(f'{list_id}.json', 'w') as f:
+    with open(f'lists/{list_id}.json', 'w') as f:
         json.dump(shopping_list, f)
     return shopping_list
 
 # Function to add an item to a shopping list
 def add_item(list_id, item):
-    with open(f'{list_id}.json', 'r') as f:
+    with open(f'lists/{list_id}.json', 'r') as f:
         shopping_list = json.load(f)
     shopping_list['items'].append(item)
-    with open(f'{list_id}.json', 'w') as f:
+    with open(f'lists/{list_id}.json', 'w') as f:
         json.dump(shopping_list, f)
     return shopping_list
 
 # Function to sync a shopping list with DynamoDB
 def sync_with_dynamodb(list_id):
-    with open(f'{list_id}.json', 'r') as f:
+    with open(f'lists/{list_id}.json', 'r') as f:
         shopping_list = json.load(f)
     table.put_item(Item=shopping_list)
 
 # Function to list all available shopping lists
 def list_shopping_lists():
-    shopping_lists = [filename.split('.')[0] for filename in os.listdir() if filename.endswith('.json')]
+    shopping_lists = [filename.split('.')[0] for filename in os.listdir('lists/') if filename.endswith('.json')]
     return shopping_lists
 
 # Function to get the name of a shopping list
 def get_list_name(list_id):
-    with open(f'{list_id}.json', 'r') as f:
+    with open(f'lists/{list_id}.json', 'r') as f:
         shopping_list = json.load(f)
     return shopping_list['name']
 
