@@ -33,7 +33,7 @@ def add_item(list_id, item):
 def sync_with_dynamodb(list_id):
     with open(f'lists/{list_id}.json', 'r') as f:
         shopping_list = json.load(f)
-    table.put_item(Item=shopping_list)
+    # table.put_item(Item=shopping_list)
 
 # Function to list all available shopping lists
 def list_shopping_lists():
@@ -46,6 +46,7 @@ def get_list_name(list_id):
         shopping_list = json.load(f)
     return shopping_list['name']
 
+
 # Main function
 if __name__ == "__main__":
     while True:
@@ -53,7 +54,8 @@ if __name__ == "__main__":
         print("2. Add Item to Shopping List")
         print("3. List Available Shopping Lists")
         print("4. Sync Shopping List to Cloud (DynamoDB)")
-        choice = input("Enter your choice: ")
+        print("5. Quit")
+        choice = input("Enter your choice: ").strip().lower()
 
         if choice == '1':
             name = input("Enter the name of the shopping list: ")
@@ -85,5 +87,9 @@ if __name__ == "__main__":
             sync_with_dynamodb(list_id)
             print(f'Shopping list synced to DynamoDB.')
 
-        else:
+        elif choice == '5':
+            print("Goodbye!")
             break
+
+        else:
+           print("Invalid choice!")
