@@ -45,6 +45,11 @@ import hashlib
 #
 #     def _hash_id(self, id):
 #         return hashlib.sha256(id.encode()).hexdigest()
+
+def dict_to_shopping_list(dictionary: dict):
+    return ShoppingList(dictionary['id'], dictionary['name'], dictionary['items'])
+
+
 class ShoppingList:
     def __init__(self, id: str, name: str, items: dict[str, int] = None):
         self.id = id  # will probably be used for the url, at least for now

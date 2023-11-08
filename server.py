@@ -13,15 +13,14 @@ from uuid import uuid4
 import zmq
 import threading
 
-from tests.shopping_list import ShoppingList
-
-
 class HashTable:
     def __init__(self, nodes):
         self._context = zmq.Context()
         self.sockets = {}
         self.threads = {}
         self.nodes = nodes
+        self.read_quorum = len(nodes) // 2 + 1
+        self.write_quorum = len(nodes) // 2 + 1
 
         self.ring = {}
         self.weights = {}
@@ -121,6 +120,9 @@ class HashTable:
 
         self._sorted_keys.sort()
 
+        print(self._sorted_keys)
+        print(self.ring)
+
     def listen(self, socket: zmq.Socket):
         while True:
             # TODO usar polling ou selector para verificar/escolher se tem mensagens
@@ -152,12 +154,13 @@ class HashTable:
                 continue
 
             request = message.decode('utf-8')
+            json_request = json.loads(request)
             print(request, " received")
 
             # planning more cases, but only get for now
             # assume request is a json with key and request type
-            if json.loads(request)['type'] == 'get':
-                key = json.loads(request)['key']
+            if json_request['type'] == 'get':
+                key = json_request['key']
                 # Receive the response from the appropriate node using the ZeroMQ socket for that node.
                 # Send the response to the client.
 
@@ -165,8 +168,8 @@ class HashTable:
                 print(value)
                 self.router_socket.send_multipart([identity, value])
 
-            elif json.loads(request)['type'] == 'put':
-                shopping_list = json.loads(request)['shopping_list']
+            elif json_request['type'] == 'put':
+                shopping_list = json_request['shopping_list']
                 # Receive the response from the appropriate node using the ZeroMQ socket for that node.
                 # Send the response to the client.
 
@@ -180,21 +183,7 @@ class HashTable:
             # self.router_socket.send(response)
 
     def route(self, list_id: str):
-        # given the uuid of the list, return the node that should store it, using consistent hashing
-        # both the list id and the node id are uuids, so we can use the first 8 bytes of the hash
-        # to get an integer and use it to compare the nodes
-
-        # use binary search to find the first node with a hash greater than the list id hash
-        # if the list id hash is greater than the last node hash, return the last node
-        # if the list id hash is smaller than the first node hash, return the first node
-        # if the list id hash is between two nodes, return the first node
-        # if the list id hash is equal to a node hash, return that node
-
-        # if there is only one node, return that node
         return self.get_node(list_id)
-
-        # node = "tcp://localhost:5555"
-        # return node
 
     def get(self, key):
         # Create a request message.
@@ -246,3 +235,19 @@ if __name__ == "__main__":
     # Get the value for the key "foo".
     # value = hash_table.get("foo")
     # print(value)
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
