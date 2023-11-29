@@ -97,7 +97,7 @@ if __name__ == "__main__":
     client.load_shopping_lists()
 
     # Get the value for the key "foo".
-    value = client.get("foo")
+    value = client.get("fooo")
 
     while True:
         print("1. Create Shopping List")

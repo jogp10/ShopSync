@@ -9,12 +9,15 @@ import math
 import time
 from bisect import bisect
 from uuid import uuid4
+import matplotlib.pyplot as plt
 
 import zmq
 import threading
 
+N = 4
+
 class HashTable:
-    def __init__(self, nodes):
+    def __init__(self, nodes, replica_count=3):
         self._context = zmq.Context()
         self.sockets = {}
         self.threads = {}
@@ -22,10 +25,11 @@ class HashTable:
         self.read_quorum = len(nodes) // 2 + 1
         self.write_quorum = len(nodes) // 2 + 1
 
-        self.ring = {}
-        self.weights = {}
 
-        self._sorted_keys = []
+        self.ring = {}
+        self.replica_count = replica_count
+
+        self.sorted_keys = []
         router_address = "tcp://*:5554"
         self.router_socket = self._context.socket(zmq.ROUTER)
         self.router_socket.bind(router_address)
@@ -46,25 +50,6 @@ class HashTable:
 
         self.generate_ring()
 
-    def _hash_val(self, b_key, entry_fn):
-        return ((b_key[entry_fn(3)] << 24)
-                | (b_key[entry_fn(2)] << 16)
-                | (b_key[entry_fn(1)] << 8)
-                | b_key[entry_fn(0)])
-
-    def _hash_digest(self, key):
-        m = hashlib.md5()
-        m.update(key.encode('utf-8'))
-        return [ord(p) for p in m.hexdigest()]
-
-    def gen_key(self, key):
-        """Given a string key it returns a long value,
-        this long value represents a place on the hash ring.
-        md5 is currently used because it mixes well.
-        """
-        b_key = self._hash_digest(key)
-        return self._hash_val(b_key, lambda x: x)
-
     def get_node(self, string_key):
         """Given a string key a corresponding node in the hash ring is returned.
         If the hash ring is empty, `None` is returned.
@@ -72,60 +57,89 @@ class HashTable:
         pos = self.get_node_pos(string_key)
         if pos is None:
             return None
-        return self.ring[self._sorted_keys[pos]]
+        return self.ring[self.sorted_keys[pos]]
 
-    def get_node_pos(self, string_key):
-        """Given a string key a corresponding node in the hash ring is returned
-        along with it's position in the ring.
-        If the hash ring is empty, (`None`, `None`) is returned.
-        """
+    def get_node_key(self, node, replica_index):
+        return hashlib.sha256(f"{node}-{replica_index}".encode()).hexdigest()
+
+    def get_node_pos(self, key):
         if not self.ring:
             return None
 
-        key = self.gen_key(string_key)
+        hash_key = self.hash_key(key)
+        for i, ring_key in enumerate(self.sorted_keys):
+            if hash_key <= ring_key:
+                return i
 
-        nodes = self._sorted_keys
-        pos = bisect(nodes, key)
+        # If the hash is greater than all keys, loop back to the first node
+        return 0
 
-        if pos == len(nodes):
-            return 0
-        else:
-            return pos
+    def get_replica_nodes(self, primary_node):
+        if not self.ring:
+            return []
+
+        primary_index = self.sorted_keys.index(self.get_node_key(primary_node, 0))
+        #skip the primary node
+        i = 0
+        j = 0
+        replica_indices = []
+        index = primary_index - 1
+        while j < len(self.sorted_keys) and i < N:
+            # get the node at the next index, clockwise
+            next_node = self.ring[self.sorted_keys[index]]
+            if next_node != primary_node:
+                replica_indices.append(index)
+                i += 1
+            index = (index - 1) % len(self.sorted_keys)
+            j += 1
+
+        return [self.ring[self.sorted_keys[i]] for i in replica_indices]
+
+    def hash_key(self, key):
+        return hashlib.sha256(key.encode()).hexdigest()
+
+    def add_node(self, node):
+        for i in range(self.replica_count):
+            key = self.get_node_key(node, i)
+            self.ring[key] = node
+            self.sorted_keys.append(key)
+
+        self.sorted_keys.sort()
+
+    def remove_node(self, node):
+        for i in range(self.replica_count):
+            key = self.get_node_key(node, i)
+            del self.ring[key]
+            self.sorted_keys.remove(key)
+
+    def print_ring(self):
+        print("Hash Ring:")
+        for key in self.sorted_keys:
+            print(f"{key}: {self.ring[key]}")
 
 
-# TODO insert and delete node
+    # TODO insert and delete node
     def generate_ring(self):
         """
         https://gist.github.com/soekul/a240f9e11d6439bd0237c4ab45dce7a2
         :return:
         """
-        total_weight = 0
-        node_range = 4
         for node in self.nodes:
-            total_weight += self.weights.get(node, 1)
+            for i in range(self.replica_count):
+                key = self.get_node_key(node, i)
+                self.ring[key] = node
+                self.sorted_keys.append(key)
 
-        for node in self.nodes:
 
-            weight = self.weights.get(node, 1)
+        self.sorted_keys.sort()
 
-            factor = math.floor((node_range * len(self.nodes) * weight) / total_weight)
-
-            for j in range(0, int(factor)):
-                b_key = self._hash_digest('%s-%s' % (node, j))
-
-                for i in range(0, 3):
-                    key = self._hash_val(b_key, lambda x: x + i * 4)
-                    self.ring[key] = node
-                    self._sorted_keys.append(key)
-
-        self._sorted_keys.sort()
-
-        print(self._sorted_keys)
+        print(self.sorted_keys)
         print(self.ring)
+
 
     def listen(self, socket: zmq.Socket):
         while True:
-            # TODO usar polling ou selector para verificar/escolher se tem mensagens
+            # TODO usar polling ou selector para verificar/escolher se tem mensagens??
 
             request = socket.recv()
             print(request.decode('utf-8'), " received")
@@ -218,6 +232,94 @@ class HashTable:
         # TODO how to store each list???
 
 
+class DynamoNode:
+    def __init__(self, name):
+        self.name = name
+        self.data = {}
+
+    def store_data(self, key, value):
+        self.data[key] = value
+
+    def get_data(self, key):
+        return self.data.get(key)
+
+    def replicate_data(self, key, value, successor_node):
+        successor_node.store_data(key, value)
+
+    def read_data_quorum(self, key, hash_ring, dynamo_nodes, quorum_size):
+        primary_node = hash_ring.get_node(key)
+        replicas = hash_ring.get_replica_nodes(primary_node)
+
+        read_responses = []
+        if self.name == primary_node:
+            read_responses.append(self.data.get(key))
+
+        for replica_node in replicas:
+            replica_node = dynamo_nodes[replica_node]
+            if replica_node != primary_node:
+                replica_data = replica_node.get_data(key)
+                if replica_data is not None:
+                    read_responses.append(replica_data)
+
+            if len(read_responses) >= quorum_size:
+                break
+
+        # validate size of read_responses after return??
+        return read_responses
+
+    def write_data_quorum(self, key, value, hash_ring, dynamo_nodes, quorum_size):
+        primary_node = hash_ring.get_node(key)
+        replicas = hash_ring.get_replica_nodes(primary_node)
+
+        write_responses = []
+        if self.name == primary_node:
+            self.store_data(key, value)
+            write_responses.append(True)
+
+        for replica in replicas:
+            replica_node = dynamo_nodes[replica]
+            if replica_node != primary_node:
+                replica_node.store_data(key, value)
+                write_responses.append(True)
+                # TODO message logic and confirmations of success
+
+            # if len(write_responses) >= quorum_size:
+            #     break
+
+        return len([r for r in write_responses if r]) >= quorum_size
+
+
+def store_data(key, value, hash_ring, dynamo_nodes):
+    node = hash_ring.get_node(key)
+    dynamo_node = dynamo_nodes[node]
+
+    # Store data in the primary node
+    dynamo_node.store_data(key, value)
+
+    # Replicate data to the replica nodes
+    replicas = hash_ring.get_replica_nodes(node) # set??
+    for replica in replicas:
+        replica_node = dynamo_nodes[replica]
+        replica_node.store_data(key, value)
+
+
+def read_data_quorum(key, quorum_size, hash_ring, dynamo_nodes):
+    node = hash_ring.get_node(key)
+    dynamo_node = dynamo_nodes[node]
+    result = dynamo_node.read_data_quorum(key, hash_ring, dynamo_nodes, quorum_size)
+    if len(result) < quorum_size:
+        return None
+    # todo validate if all results are the same
+    return result
+
+def write_data_quorum(key, value, quorum_size, hash_ring, dynamo_nodes):
+    node = hash_ring.get_node(key)
+    dynamo_node = dynamo_nodes[node]
+    result = dynamo_node.write_data_quorum(key, value, hash_ring, dynamo_nodes, quorum_size)
+    return result
+
+
+
 if __name__ == "__main__":
     nodes = [
         "tcp://localhost:5555",
@@ -226,15 +328,50 @@ if __name__ == "__main__":
         "tcp://localhost:5558",
     ]
 
+
+
     hash_table = HashTable(nodes)
+    dynamo_nodes = {node: DynamoNode(node) for node in nodes}
+    R = 2
+    W = 3
+    # positions = []
+    # # for 1000 random strings of length 10, plot the distribution of the positions of the got node in the ring
+    # for i in range(10000):
+    #     key = str(uuid4())
+    #     positions.append(hash_table.get_node_pos(key))
+    #     # print(get_node_pos(key))
+    # l = len(hash_table.sorted_keys)
+    # plt.hist(positions, bins=l)
+    # plt.show()
+    # print('Plotting done')
+
+    # Example usage:
+    store_data("key1", "value1", hash_table, dynamo_nodes)
+    store_data("key2", "value2", hash_table, dynamo_nodes)
+    store_data("key3", "value3", hash_table, dynamo_nodes)
+
+    # Retrieve data from the appropriate node
+    key_to_lookup = "key2"
+    # node = hash_table.get_node(key_to_lookup)
+    # result = dynamo_nodes[node].get_data(key_to_lookup)
+    # print(f"Data for key '{key_to_lookup}': {result}")
+
+    result = read_data_quorum(key_to_lookup, R, hash_table, dynamo_nodes)
+    print(f"Data for key '{key_to_lookup}' with quorum: {result}")
+
+    key_to_write = "key4"
+    value_to_write = "value4"
+    quorum_size = 2
+    result = write_data_quorum(key_to_write, value_to_write, W, hash_table, dynamo_nodes)
+    print(f"Write success: {result}")
+
+    # Verify the data has been written
+    read_result = dynamo_nodes[hash_table.get_node(key_to_write)].get_data(key_to_write)
+    print(f"Data for key '{key_to_write}': {read_result}")
 
     # Start listening for requests on the client socket.
     hash_table.expose()
-    # hash_table.client_socket.listen()
-    #
-    # Get the value for the key "foo".
-    # value = hash_table.get("foo")
-    # print(value)
+
 
 
 
