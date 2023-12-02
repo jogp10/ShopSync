@@ -43,8 +43,8 @@ class HashRing:
 
         self.sorted_keys.sort()
 
-        print(self.sorted_keys)
-        print(self.ring)
+        # print(self.sorted_keys)
+        # print(self.ring)
 
 
     def get_node(self, string_key):
@@ -148,12 +148,9 @@ class Router:
         # for DEBUG/DEV ONLY, TODO remove later
         socketNode.store_data("key2", "value9")
         while True:
-            # TODO usar polling ou selector para verificar/escolher se tem mensagens??
-
+            # TODO usar polling ou selector para verificar/escolher se tem mensagens?
 
             request = json.loads(socket.recv())
-            print(json.dumps(request), " received")
-
             key = request['key']
 
             # switch case on request type
@@ -171,11 +168,21 @@ class Router:
                     socket.send_json(response)
                     continue
 
+                case MessageType.PUT:
+                    value = request['value']
+                    response = {
+                        "type": MessageType.PUT_RESPONSE,
+                        "key": key,
+                        "value": socketNode.store_data(key, value),
+                        "address": socket.IDENTITY.decode('utf-8'),
+                        "quorum_id": request['quorum_id']
+                    }
+                    # time.sleep(1)
+                    socket.send_json(response)
+                    continue
 
-            # request = socket.recv( zmq.NOBLOCK)
 
-            # print(request, " received")
-
+            # request = socket.recv( zmq.NOBLOCK
             # Receive the response from the appropriate node using the ZeroMQ socket for that node.
 
             # Send the response to the client.
@@ -185,26 +192,40 @@ class Router:
 
     def process_tasks(self, tasks_queue, read_quorum_requests_state, write_quorum_requests_state):
         """For requests and replies between the router and server nodes"""
-        print("Starting task processing thread")
         while True:
             task = tasks_queue.get()
             if task is None:
                 break
 
-            # check type of task, a task is a request
-            if get_request_type(task) == MessageType.GET_RESPONSE:
-            #     get responses have a id attribute
-                request_id = task['quorum_id']
-                if request_id in read_quorum_requests_state:
-                    # if the request is in the read quorum requests state, add the response to the responses list
-                    read_quorum_requests_state[request_id]['nodes_with_reply'].add(task['address'])
-                    read_quorum_requests_state[request_id]['responses'].append(task['value'])
-                    read_quorum_requests_state[request_id]['retry_info'][task['address']] += 1
-                else:
-                    print("Received a response for a request that was already processed")
-                    continue
+            match get_request_type(task):
+                case MessageType.GET_RESPONSE:
+                        #     get responses have a id attribute
+                    request_id = task['quorum_id']
+                    if request_id in read_quorum_requests_state:
+                        if task['address'] not in read_quorum_requests_state[request_id]['nodes_with_reply']:
+                            # if the request is in the read quorum requests state, add the response to the responses list
+                            read_quorum_requests_state[request_id]['nodes_with_reply'].add(task['address'])
+                            read_quorum_requests_state[request_id]['responses'].append(task['value'])
+                            read_quorum_requests_state[request_id]['retry_info'][task['address']] += 1
+                    else:
+                        print("GET::Received a response for a request that was already processed")
+                        continue
 
-            print(f"Executing task: {task}")
+                case MessageType.PUT_RESPONSE:
+                    request_id = task['quorum_id']
+                    if request_id in write_quorum_requests_state:
+                        # print("PUT::Received a new response")
+                        # if the request is in the read quorum requests state, add the response to the responses list
+                        if task['address'] not in write_quorum_requests_state[request_id]['nodes_with_reply']:
+
+                            write_quorum_requests_state[request_id]['nodes_with_reply'].add(task['address'])
+                            write_quorum_requests_state[request_id]['responses'].append(task['value'])
+                            write_quorum_requests_state[request_id]['retry_info'][task['address']] += 1
+                    else:
+                        print("PUT::Received a response for a request that was already processed")
+                        print(task)
+                        continue
+
 
     def expose(self):
         # Start a thread to listen for requests on the client socket.
@@ -220,13 +241,12 @@ class Router:
             identity, message = self.router_socket.recv_multipart()
             json_request = json.loads(message)
             if identity.decode('utf-8') in self.sockets:
-                if json_request['type'] == MessageType.GET_RESPONSE:
+                if json_request['type'] == MessageType.GET_RESPONSE or json_request['type'] == MessageType.PUT_RESPONSE:
                     self.tasks_queue.put(json_request)
                     continue
                 continue
 
             request = message.decode('utf-8')
-            print(request, " received")
 
             # planning more cases, but only get for now
             # assume request is a json with key and request type
@@ -236,7 +256,6 @@ class Router:
                 # Send the response to the client.
 
                 value = self.get(key)
-                print(value)
                 self.router_socket.send_multipart([identity, value])
 
             elif json_request['type'] == 'put':
@@ -248,52 +267,78 @@ class Router:
                 # list_id = shopping_list['id']
 
                 # value = self.get(key)
-                # print(value)
                 # self.router_socket.send_multipart([identity, value])
 
             # self.router_socket.send(response)
 
-    def read_data_quorum(self, key, dynamo_nodes):
+    def read_data_quorum(self, key):
+        primary_node = self.hash_ring.get_node(key)
+        replicas = self.hash_ring.get_replica_nodes(primary_node)
+
+        quorum_id = str(uuid4())
+        request = build_quorum_get_request(key, quorum_id)
+
+        result = self.send_get_request_to_nodes(request, [primary_node] + replicas, 10, 3, R_QUORUM)
+
+
+        if len(result) < R_QUORUM:
+            print(result)
+            return None
+        # todo validate if all results are the same
+        return result
+
+    def write_data_quorum(self, key, value):
         primary_node = self.hash_ring.get_node(key)
         replicas = self.hash_ring.get_replica_nodes(primary_node)
 
         # the responses will arrive asynchronously, so we need to wait for them
         quorum_id = str(uuid4())
-        request = build_quorum_get_request(key, quorum_id)
+        request = build_quorum_put_request(key, value, quorum_id)
 
-        # send the request to the primary node and replicas
-        # wait a maximum of 5 seconds for the responses, with 1 maximum retry per node
-        # after R_QUORUM equal responses are received, stop waiting for more responses
-        # if the timeout is reached, return None
-# if the number of responses is less than R_QUORUM, return None
+        result = self.send_put_request_to_nodes(request, [primary_node] + replicas, 5, 1, W_QUORUM)
 
-        result = self.send_get_request_to_nodes(request, [primary_node] + replicas, 5, 1, R_QUORUM)
-
-        dynamo_node = dynamo_nodes[primary_node]
-        if len(result) < R_QUORUM:
+        if len(result) < W_QUORUM:
             return None
         # todo validate if all results are the same
         return result
 
-    def send_get_request_to_nodes(self, request, nodes, timeout, max_retries, quorum_size):
-        start_time = time.time()
+    def send_request_to_nodes(self, type, request, nodes, timeout, max_retries, quorum_size):
         quorum_id = request['quorum_id']
-        self.read_quorum_requests_state[quorum_id] = build_quorum_request_state(nodes, timeout, max_retries, quorum_size)
-        current_quorum_state = self.read_quorum_requests_state[quorum_id]
-        for node in nodes:
-            if not any([current_quorum_state['retry_info'][node] <= max_retries for node in nodes]):
-                return
-            # if time.time() - start_time > timeout:
-            #     return
-            if node in current_quorum_state['nodes_with_reply']:
-                continue
-            if current_quorum_state['retry_info'][node] > max_retries:
-                continue
-            current_quorum_state['retry_info'][node] += 1
+        if type == MessageType.GET:
+            self.read_quorum_requests_state[quorum_id] = build_quorum_request_state(nodes, timeout, max_retries, quorum_size)
+            current_quorum_state = self.read_quorum_requests_state[quorum_id]
+        elif type == MessageType.PUT:
+            self.write_quorum_requests_state[quorum_id] = build_quorum_request_state(nodes, timeout, max_retries,
+                                                                                    quorum_size)
+            current_quorum_state = self.write_quorum_requests_state[quorum_id]
 
-            self.router_socket.send_multipart([node.encode('utf-8'), json.dumps(request).encode('utf-8')])
+        start_time = time.time()
+        # TODO should the condition be the length of the most common response?
+        while time.time() - start_time < timeout and len(current_quorum_state['responses']) < quorum_size:
+            for node in nodes:
+                if not any([current_quorum_state['retry_info'][node] <= max_retries for node in nodes]):
+                    continue
+                if node in current_quorum_state['nodes_with_reply']:
+                    continue
+                if current_quorum_state['retry_info'][node] > max_retries:
+                    continue
+                current_quorum_state['retry_info'][node] += 1
 
-        return self.read_quorum_requests_state[quorum_id]['responses']
+                self.router_socket.send_multipart([node.encode('utf-8'), json.dumps(request).encode('utf-8')])
+
+        result = current_quorum_state['responses'].copy()
+        if type == MessageType.GET:
+            del self.read_quorum_requests_state[quorum_id]
+        elif type == MessageType.PUT:
+            del self.write_quorum_requests_state[quorum_id]
+        return result
+
+    def send_get_request_to_nodes(self, request, nodes, timeout, max_retries, quorum_size):
+        return self.send_request_to_nodes(MessageType.GET, request, nodes, timeout, max_retries, quorum_size)
+
+    def send_put_request_to_nodes(self, request, nodes, timeout, max_retries, quorum_size):
+        return self.send_request_to_nodes(MessageType.PUT, request, nodes, timeout, max_retries, quorum_size)
+
 
 
 
@@ -341,30 +386,10 @@ class DynamoNode:
 
     def store_data(self, key, value):
         self.data[key] = value
+        return True # False if errors?
 
     def get_data(self, key):
         return self.data.get(key)
-
-    def read_data_quorum(self, key, hash_ring, dynamo_nodes):
-        primary_node = hash_ring.get_node(key)
-        replicas = hash_ring.get_replica_nodes(primary_node)
-
-        read_responses = []
-        if self.name == primary_node:
-            read_responses.append(self.data.get(key))
-
-        for replica_node in replicas:
-            replica_node = dynamo_nodes[replica_node]
-            if replica_node != primary_node:
-                replica_data = replica_node.get_data(key)
-                if replica_data is not None:
-                    read_responses.append(replica_data)
-
-            if len(read_responses) >= R_QUORUM:
-                break
-
-        # validate size of read_responses after return??
-        return read_responses
 
     def write_data_quorum(self, key, value, hash_ring, dynamo_nodes):
         primary_node = hash_ring.get_node(key)
@@ -399,27 +424,17 @@ def store_data(key, value, hash_ring, dynamo_nodes):
         replica_node.store_data(key, value)
 
 
-
-def write_data_quorum(key, value, quorum_size, hash_ring, dynamo_nodes):
-    node = hash_ring.get_node(key)
-    dynamo_node = dynamo_nodes[node]
-    result = dynamo_node.write_data_quorum(key, value, hash_ring, dynamo_nodes)
-    return result
-
-
 def hash_ring_testing(hash_table):
     reversed_hash_table = {}
     for key, value in hash_table.hash_ring.ring.items():
         reversed_hash_table.setdefault(value, []).append(key)
     i = 0
     for node, keys in reversed_hash_table.items():
-        # print(node, len(keys))
         plt.clf()
         plt.plot([hash_table.sorted_keys.index(x) for x in keys], [int(x, 16) for x in keys], '.', label=node)
         plt.show()
     plt.clf()
     for node, keys in reversed_hash_table.items():
-        # print(node, len(keys))
         plt.plot([hash_table.sorted_keys.index(x) for x in keys], [int(x, 16) for x in keys], '.', label=node)
     plt.show()
     positions = []
@@ -443,36 +458,18 @@ async def main():
         "tcp://localhost:5558",
     ]
     hash_table = Router(nodes, 24)
-    hash_values = [int(x, 16) for x in hash_table.hash_ring.sorted_keys]
     dynamo_nodes = {node: DynamoNode(node) for node in nodes}
-    R = 2
-    W = 3
-    # hash_ring_testing(hash_table.hash_ring)
-    # Example usage:
+
     hash_table.expose()
 
-    store_data("key1", "value1", hash_table.hash_ring, dynamo_nodes)
-    store_data("key2", "value2", hash_table.hash_ring, dynamo_nodes)
-    store_data("key3", "value3", hash_table.hash_ring, dynamo_nodes)
-    # for all dynamo nodes , store value9 in key2
-    for node in dynamo_nodes:
-        dynamo_nodes[node].store_data("key2", "value9")
-    # Retrieve data from the appropriate node
+    # store_data("key1", "value1", hash_table.hash_ring, dynamo_nodes)
+    # store_data("key2", "value2", hash_table.hash_ring, dynamo_nodes)
+    # store_data("key3", "value3", hash_table.hash_ring, dynamo_nodes)
+
     key_to_lookup = "key2"
-    # node = hash_table.get_node(key_to_lookup)
-    # result = dynamo_nodes[node].get_data(key_to_lookup)
-    # print(f"Data for key '{key_to_lookup}': {result}")
-    # result = asyncio.ensure_future(hash_table.read_data_quorum(key_to_lookup, dynamo_nodes))
-    result = hash_table.read_data_quorum(key_to_lookup, dynamo_nodes)
-    print(f"Data for key '{key_to_lookup}' with quorum: {result}")
-    # key_to_write = "key4"
-    # value_to_write = "value4"
-    # quorum_size = 2
-    # result = write_data_quorum(key_to_write, value_to_write, W, hash_table.hash_ring, dynamo_nodes)
-    # print(f"Write success: {result}")
-    # # Verify the data has been written
-    # read_result = dynamo_nodes[hash_table.hash_ring.get_node(key_to_write)].get_data(key_to_write)
-    # print(f"Data for key '{key_to_write}': {read_result}")
+    hash_table.write_data_quorum(key_to_lookup, "value4")
+    result = hash_table.read_data_quorum(key_to_lookup)
+    print(f"---------------------------------------------------------------------------\nData for key '{key_to_lookup}' with quorum: {result}\n---------------------------------------------------------------------------")
 
 
 if __name__ == "__main__":

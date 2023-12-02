@@ -12,16 +12,13 @@ class MessageType(IntEnum):
     PUT_RESPONSE = 5
 
 
-
-
-
-
 def build_get_request(key):
     """given a key, return a json for a get request of that key"""
     return {
         "type": MessageType.GET,
         "key": key
     }
+
 
 def build_quorum_get_request(key, quorum_id):
     """given a key, return a json for a get request of that key"""
@@ -31,12 +28,23 @@ def build_quorum_get_request(key, quorum_id):
         "quorum_id": quorum_id
     }
 
+
 def build_put_request(key, value):
     """given a key and a value, return a json for a put request of that key and value"""
     return {
-        "type": "put",
+        "type": MessageType.PUT,
         "key": key,
-        "value": value
+        "value": value,
+    }
+
+
+def build_quorum_put_request(key, value, quorum_id):
+    """given a key and a value, return a json for a put request of that key and value"""
+    return {
+        "type": MessageType.PUT,
+        "key": key,
+        "value": value,
+        "quorum_id": quorum_id
     }
 
 
@@ -57,3 +65,15 @@ def build_quorum_request_state(nodes, timeout, max_retries, quorum_size):
         "quorum_size": quorum_size
     }
 
+
+def get_quorum_value(values, quorum_size):
+    """given a list values and a quorum size, return the value that appears in at least quorum_size values"""
+    for value in values:
+        if values.count(value) >= quorum_size:
+            return value
+    return None
+
+
+def get_most_common_value(values):
+    """given a list of values, return the value that appears the most times"""
+    return max(set(values), key=values.count)
