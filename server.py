@@ -3,10 +3,8 @@
 # Should we just use HTTP instead of ZeroMQ?
 import hashlib
 import json
-import math
 import queue
 import time
-from bisect import bisect
 from uuid import uuid4
 import matplotlib.pyplot as plt
 
@@ -14,14 +12,12 @@ import zmq
 import threading
 import asyncio
 
-from crdt_test import ShoppingList
+from crdt import ShoppingListCRDT
 from utils import *
 
 N = 4
 R_QUORUM = 2
 W_QUORUM = 3
-
-
 
 
 class HashRing:
@@ -47,7 +43,6 @@ class HashRing:
         # print(self.sorted_keys)
         # print(self.ring)
 
-
     def get_node(self, string_key):
         """Given a string key a corresponding node in the hash ring is returned.
         If the hash ring is empty, `None` is returned.
@@ -72,7 +67,7 @@ class HashRing:
             return []
 
         primary_index = self.sorted_keys.index(self.get_node_key(primary_node, 0))
-        #skip the primary node
+        # skip the primary node
         i = 0
         j = 0
         replica_indices = []
@@ -143,17 +138,15 @@ class Router:
             self.sockets[node] = socket
             self.threads[node] = thread
 
-
     def listen(self, socket: zmq.Socket):
         identity = socket.IDENTITY.decode('utf-8')
         socket_node = DynamoNode(identity)
         # for DEBUG/DEV ONLY, TODO remove later
-        socket_node.store_data("key2", 9)
+        socket_node.increment_item("key2", 9)
 
         # create new socket for message receiving
         # router_socket = self._context.socket(zmq.ROUTER)
         # router_socket.bind(identity)
-
 
         while True:
             # TODO usar polling ou selector para verificar/escolher se tem mensagens?
@@ -183,7 +176,7 @@ class Router:
                     response = {
                         "type": MessageType.PUT_RESPONSE,
                         "key": key,
-                        "value": socket_node.store_data(key, value),
+                        "value": socket_node.increment_item(key, value),
                         "address": socket.IDENTITY.decode('utf-8'),
                         "quorum_id": request['quorum_id']
                     }
@@ -191,12 +184,10 @@ class Router:
                     socket.send_json(response)
                     continue
 
-
             # request = socket.recv( zmq.NOBLOCK
             # Receive the response from the appropriate node using the ZeroMQ socket for that node.
 
             # Send the response to the client.
-
 
             socket.send(json.dumps({key: "bar"}).encode('utf-8'))
 
@@ -209,7 +200,7 @@ class Router:
 
             match get_request_type(task):
                 case MessageType.GET_RESPONSE:
-                        #     get responses have a id attribute
+                    #     get responses have a id attribute
                     request_id = task['quorum_id']
                     if request_id in read_quorum_requests_state:
                         if task['address'] not in read_quorum_requests_state[request_id]['nodes_with_reply']:
@@ -227,7 +218,6 @@ class Router:
                         # print("PUT::Received a new response")
                         # if the request is in the read quorum requests state, add the response to the responses list
                         if task['address'] not in write_quorum_requests_state[request_id]['nodes_with_reply']:
-
                             write_quorum_requests_state[request_id]['nodes_with_reply'].add(task['address'])
                             write_quorum_requests_state[request_id]['responses'].append(task['value'])
                             write_quorum_requests_state[request_id]['retry_info'][task['address']] += 1
@@ -236,11 +226,11 @@ class Router:
                         print(task)
                         continue
 
-
     def expose(self):
         # Start a thread to listen for requests on the client socket.
-        tasks_thread = threading.Thread(target=self.process_tasks, args=(self.tasks_queue, self.read_quorum_requests_state,
-                                                                         self.write_quorum_requests_state))
+        tasks_thread = threading.Thread(target=self.process_tasks,
+                                        args=(self.tasks_queue, self.read_quorum_requests_state,
+                                              self.write_quorum_requests_state))
         tasks_thread.start()
 
         main_thread = threading.Thread(target=self.listen_for_client_requests)
@@ -290,7 +280,6 @@ class Router:
 
         result = self.send_get_request_to_nodes(request, [primary_node] + replicas, 10, 3, R_QUORUM)
 
-
         if len(result) < R_QUORUM:
             print(result)
             return None
@@ -315,11 +304,12 @@ class Router:
     def send_request_to_nodes(self, type, request, nodes, timeout, max_retries, quorum_size):
         quorum_id = request['quorum_id']
         if type == MessageType.GET:
-            self.read_quorum_requests_state[quorum_id] = build_quorum_request_state(nodes, timeout, max_retries, quorum_size)
+            self.read_quorum_requests_state[quorum_id] = build_quorum_request_state(nodes, timeout, max_retries,
+                                                                                    quorum_size)
             current_quorum_state = self.read_quorum_requests_state[quorum_id]
         elif type == MessageType.PUT:
             self.write_quorum_requests_state[quorum_id] = build_quorum_request_state(nodes, timeout, max_retries,
-                                                                                    quorum_size)
+                                                                                     quorum_size)
             current_quorum_state = self.write_quorum_requests_state[quorum_id]
 
         start_time = time.time()
@@ -348,10 +338,6 @@ class Router:
 
     def send_put_request_to_nodes(self, request, nodes, timeout, max_retries, quorum_size):
         return self.send_request_to_nodes(MessageType.PUT, request, nodes, timeout, max_retries, quorum_size)
-
-
-
-
 
     def route(self, list_id: str):
         return self.hash_ring.get_node(list_id)
@@ -392,31 +378,17 @@ class Router:
 class DynamoNode:
     def __init__(self, name):
         self.name = name
-        self.data: ShoppingList = ShoppingList.zero()
+        self.data: ShoppingListCRDT = ShoppingListCRDT.zero()
 
-    def store_data(self, key, value):
+    def increment_item(self, key, value):
         if value >= 0:
             self.data = self.data.inc(key, self.name, value)
         else:
             self.data = self.data.dec(key, self.name, -value)
-        return True # False if errors?
+        return True  # False if errors?
 
     def get_data(self, key):
         return self.data.value(key)
-
-
-def store_data(key, value, hash_ring, dynamo_nodes):
-    node = hash_ring.get_node(key)
-    dynamo_node = dynamo_nodes[node]
-
-    # Store data in the primary node
-    dynamo_node.store_data(key, value)
-
-    # Replicate data to the replica nodes
-    replicas = hash_ring.get_replica_nodes(node) # set??
-    for replica in replicas:
-        replica_node = dynamo_nodes[replica]
-        replica_node.store_data(key, value)
 
 
 def hash_ring_testing(hash_table):
@@ -453,36 +425,16 @@ async def main():
         "tcp://localhost:5558",
     ]
     hash_table = Router(nodes, 24)
-    dynamo_nodes = {node: DynamoNode(node) for node in nodes}
-
     hash_table.expose()
-
-    # store_data("key1", "value1", hash_table.hash_ring, dynamo_nodes)
-    # store_data("key2", "value2", hash_table.hash_ring, dynamo_nodes)
-    # store_data("key3", "value3", hash_table.hash_ring, dynamo_nodes)
 
     key_to_lookup = "key2"
     hash_table.write_data_quorum(key_to_lookup, 4)
     result = hash_table.read_data_quorum(key_to_lookup)
-    print(f"---------------------------------------------------------------------------\nData for key '{key_to_lookup}' with quorum: {result}\n---------------------------------------------------------------------------")
+    print(
+        f"---------------------------------------------------------------------------"
+        f"\nData for key '{key_to_lookup}' with quorum: {result}\n"
+        f"---------------------------------------------------------------------------\n")
 
 
 if __name__ == "__main__":
     asyncio.run(main())
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-

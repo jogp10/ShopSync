@@ -1,261 +1,234 @@
-# from crdt import CRDT
-"""
-class ShoppingList:
-    def __init__(self):
-        self.crdt = CRDT()
-
-    def add_item(self, item):
-        self.crdt.add(item)
-
-    def remove_item(self, item):
-        self.crdt.remove(item)
-
-    def get_items(self):
-        return list(self.crdt)
-
-    def clear_list(self):
-        self.crdt.clear()
-        """
-
-from typing import TypeVar, Generic
-from datetime import datetime
+from typing import Dict
 from collections import defaultdict
 
-#
-# # AWORSet implementation
-# class AWORSet:
-#     def __init__(self):
-#         self.replicas = defaultdict(set)
-#
-#     @staticmethod
-#     def zero():
-#         return AWORSet()
-#
-#     def value(self):
-#         return set.union(*self.replicas.values())
-#
-#     def add(self, replica, item):
-#         self.replicas[replica].add(item)
-#
-#     def rem(self, replica, item):
-#         if replica in self.replicas:
-#             self.replicas[replica].discard(item)
-#
-#     @staticmethod
-#     def merge(a, b):
-#         result = AWORSet()
-#         for replica, items in a.replicas.items():
-#             result.replicas[replica].update(items)
-#         for replica, items in b.replicas.items():
-#             result.replicas[replica].update(items)
-#         return result
+ReplicaId = str
+
+Lt = -1
+Eq = 0
+Gt = 1
+Cc = 2
 
 
-####
-from typing import TypeVar, Generic
-from enum import Enum
-from collections import defaultdict
+class GCounter:
+    def __init__(self, counter_map, replica_clock=None):
+        self.counter_map = counter_map
+        self.replica_clock = defaultdict(int) if replica_clock is None else replica_clock
+
+    @staticmethod
+    def zero():
+        return GCounter({}, {})
+
+    # @property
+    def value(self):
+        return sum(self.counter_map.values())
+
+    def inc(self, replica, value):
+        updated_counter_map = self.counter_map.copy()
+        updated_counter_map[replica] = updated_counter_map.get(replica, 0) + value
+
+        updated_replica_clock = self.replica_clock.copy()
+        updated_replica_clock[replica] = updated_replica_clock.get(replica, 0) + 1
+
+        return GCounter(updated_counter_map, updated_replica_clock)
+
+    def compare_clocks(self, clock_a, clock_b):
+        keys = set(clock_a.keys()) | set(clock_b.keys())
+        prev = Eq
+
+        # ex: clock_a = {'a': 1, 'b': 2, 'c': 1}, clock_b = {'a': 1, 'b': 1, 'c': 2} are concurrent
+        # the merge of these two clocks is {'a': 1, 'b': 2, 'c': 2}
+
+        for k in keys:
+            va = clock_a.get(k, 0)
+            vb = clock_b.get(k, 0)
+
+            if prev == Eq:
+                if va > vb:
+                    prev = Gt
+                elif va < vb:
+                    prev = Lt
+            elif prev == Lt and va > vb:
+                return Cc
+            elif prev == Gt and va < vb:
+                return Cc
+
+        return prev
+
+    def merge(self, other_counter):
+        comparison_result = self.compare_clocks(self.replica_clock, other_counter.replica_clock)
+
+        if comparison_result == Lt:
+            merged_replica_clock = other_counter.replica_clock.copy()
+        elif comparison_result == Gt:
+            merged_replica_clock = self.replica_clock.copy()
+        else:
+            # Concurrent, resolve conflicts based on the maximum values
+            merged_replica_clock = {k: max(self.replica_clock.get(k, 0), other_counter.replica_clock.get(k, 0))
+                                    for k in set(self.replica_clock) | set(other_counter.replica_clock)}
+
+        merged_counter_map = self.counter_map.copy()
+
+        # use the merged replica clock to resolve conflicts
+        keys = set(self.replica_clock.keys()) | set(other_counter.replica_clock.keys())
+        for replica in keys:
+            if self.replica_clock.get(replica, 0) == merged_replica_clock.get(replica, -1):
+                merged_counter_map[replica] = self.counter_map.get(replica, 0)
+            elif other_counter.replica_clock.get(replica, 0) == merged_replica_clock.get(replica, -1):
+                merged_counter_map[replica] = other_counter.counter_map.get(replica, 0)
+            else:
+                print("This should never happen")
+                merged_counter_map[replica] = max(self.counter_map.get(replica, 0),
+                                                  other_counter.counter_map.get(replica, 0))
+
+        return GCounter(merged_counter_map, merged_replica_clock)
 
 
-# Ord enumeration
-class Ord(Enum):
-    Lt = -1
-    Eq = 0
-    Gt = 1
-    Cc = 2
+class PNCounter:
+    def __init__(self, inc, dec):
+        self.inc_counter = inc
+        self.dec_counter = dec
+
+    @staticmethod
+    def zero():
+        return PNCounter(GCounter.zero(), GCounter.zero())
+
+    # @property
+    def value(self):
+        return GCounter.value(self.inc_counter) - GCounter.value(self.dec_counter)
+
+    def inc(self, replica, value):
+        return PNCounter(GCounter.inc(self.inc_counter, replica, value), self.dec_counter)
+
+    def dec(self, replica, value):
+        return PNCounter(self.inc_counter, GCounter.inc(self.dec_counter, replica, value))
+
+    def merge(self, other_counter):
+        merged_inc = GCounter.merge(self.inc_counter, other_counter.inc_counter)
+        merged_dec = GCounter.merge(other_counter.dec_counter, self.dec_counter)
+        return PNCounter(merged_inc, merged_dec)
 
 
-# Version class
+class ShoppingListCRDT:
+    """This is essentially a PNCounterMap"""
+
+    @staticmethod
+    def zero():
+        return ShoppingListCRDT({})
+
+    def __init__(self, counters):
+        self.counters = counters
+
+    def get_or_create(self, id):
+        if id not in self.counters:
+            self.counters[id] = PNCounter.zero()
+        return self.counters[id]
+
+    def inc(self, id, replica, value):
+        counter = self.get_or_create(id)
+        updated_counters = self.counters.copy()
+        updated_counters.update({id: counter.inc(replica, value)})
+        return ShoppingListCRDT(updated_counters)
+
+    def dec(self, id, replica, value):
+        counter = self.get_or_create(id)
+        updated_counters = self.counters.copy()
+        updated_counters.update({id: counter.dec(replica, value)})
+        return ShoppingListCRDT(updated_counters)
+
+    def merge(self, other):
+        merged_counters = {}
+        for id, counter in self.counters.items():
+            if id in other.counters:
+                merged_counters[id] = counter.merge(other.counters[id])
+            else:
+                merged_counters[id] = counter
+        for id, counter in other.counters.items():
+            if id not in merged_counters:
+                merged_counters[id] = counter
+        return ShoppingListCRDT(merged_counters)
+
+    def value(self, key):
+        return self.get_or_create(key).value()
+
+
+# """Things that are not actually used but may serve as inspiration for any tweaks"""
+
+def upsert(k, v, fn, my_map):
+    if k not in my_map:
+        my_map[k] = v
+    else:
+        my_map[k] = fn(my_map[k])
+    return my_map
+
+
+VTime = Dict[ReplicaId, int]
+MClock = Dict[ReplicaId, VTime]
+
+
 class Version:
-    def __init__(self, replica, counter):
-        self.replica = replica
-        self.counter = counter
+    zero = {}
 
     @staticmethod
-    def zero(replica):
-        return Version(replica, 0)
-
-    def inc(self):
-        return Version(self.replica, self.counter + 1)
+    def inc(r, vv):
+        return upsert(r, 1, lambda x: x + 1, vv.copy())
 
     @staticmethod
-    def compare(version1, version2):
-        if version1.counter < version2.counter:
-            return Ord.Lt
-        elif version1.counter > version2.counter:
-            return Ord.Gt
-        else:
-            return Ord.Cc
+    def set(r, ts, vv):
+        vv[r] = ts
+        return vv
 
     @staticmethod
-    def merge(version1, version2):
-        if version1.replica == version2.replica:
-            return version1 if version1.counter > version2.counter else version2
-        else:
-            raise ValueError("Cannot merge versions from different replicas")
-
-
-# VTime class
-class VTime:
-    def __init__(self):
-        self.versions = defaultdict(Version)
+    def max(vv1, vv2):
+        return {k: vv2[k] if k in vv2 else max(vv1[k], vv2[k]) for k in vv1.keys() | vv2.keys()}
 
     @staticmethod
-    def zero(replica):
-        return VTime()
-
-    def inc(self, replica):
-        self.versions[replica] = self.versions[replica].inc()
-
-# AWORSet class
-class AWORSet:
-    def __init__(self, add, rem):
-        self.add = add
-        self.rem = rem
-
-    @staticmethod
-    def zero():
-        return AWORSet(defaultdict(VTime), defaultdict(VTime))
-
-    def value(self):
-        rem = self.rem
-        add = self.add
-        for k, vr in rem.items():
-            va = add[k]
-            if va and Version.compare(va, vr) == Ord.Lt:
-                del add[k]
-        return set(add.keys())
-
-    def add(self, replica, element):
-        va = self.add[element]
-        vr = self.rem[element]
-        if va and not vr:
-            self.add[element] = va.inc(replica)
-        elif not va and vr:
-            self.add[element] = Version.zero(replica)
-            del self.rem[element]
-        elif va and vr:
-            self.add[element] = va.inc(replica)
-            del self.rem[element]
-        else:
-            self.add[element] = Version.zero(replica)
-
-    def rem(self, replica, element):
-        va = self.add[element]
-        vr = self.rem[element]
-        if va and not vr:
-            self.rem[element] = va.inc(replica)
-            del self.add[element]
-        elif not va and vr:
-            self.rem[element] = vr.inc(replica)
-        elif va and vr:
-            self.rem[element] = vr.inc(replica)
-        else:
-            self.rem[element] = Version.zero(replica)
-
-    @staticmethod
-    def merge(set1, set2):
-        def merge_keys(a, b):
-            result = defaultdict(Version)
-            for k, vb in b.items():
-                va = a[k]
-                if va:
-                    result[k] = Version.merge(va, vb)
-                else:
-                    result[k] = vb
-            return result
-
-        add1 = merge_keys(set1.add, set2.add)
-        rem1 = merge_keys(set1.rem, set2.rem)
-
-        for k, vr in rem1.items():
-            va = add1[k]
-            if va and Version.compare(va, vr) == Ord.Lt:
-                del add1[k]
-
-        for k, va in add1.items():
-            vr = rem1[k]
-            if vr and Version.compare(va, vr) != Ord.Lt:
-                del rem1[k]
-
-        return AWORSet(add1, rem1)
-
-
-# Example usage:
-# Create two AWORSet instances
-awor_set1 = AWORSet.zero()
-awor_set2 = AWORSet.zero()
-
-# Add some elements to the sets
-awor_set1.add("replica1", awor_set1)
-awor_set1.add("replica1", awor_set1)
-awor_set2.add("replica2", awor_set2)
-awor_set2.add("replica2", awor_set2)
-
-# Merge the two AWORSet instances
-merged_awor_set = AWORSet.merge(awor_set1, awor_set2)
-
-# Print the merged elements
-print(merged_awor_set.value())
-
-
-class AWORMap:
-    def __init__(self, keys, entries):
-        self.keys = keys
-        self.entries = entries
-
-    @staticmethod
-    def zero():
-        return AWORMap(AWORSet.zero(), {})
-
-    def value(self):
-        return self.entries
-
-    def add(self, replica, key, value):
-        self.keys.add(replica, key)
-        self.entries[key] = value
-
-    def rem(self, replica, key):
-        self.keys.rem(replica, key)
-        if key in self.entries:
-            del self.entries[key]
+    def min(vv1, vv2):
+        return {k: vv2[k] if k in vv2 else min(vv1[k], vv2[k]) for k in vv1.keys() | vv2.keys()}
 
     @staticmethod
     def merge(a, b):
-        keys = AWORSet.merge(a.keys, b.keys)
-        entries = {}
-        for key in keys.value():
-            value_a = a.entries.get(key)
-            value_b = b.entries.get(key)
-            if value_a is not None and value_b is not None:
-                merged_value = value_a.merge(value_a, value_b)
-                entries[key] = merged_value
-            elif value_a is not None:
-                entries[key] = value_a
-            elif value_b is not None:
-                entries[key] = value_b
-        return AWORMap(keys, entries)
+        return Version.max(a, b)
+
+    @staticmethod
+    def compare(a, b):
+        keys = set(a.keys()) | set(b.keys())
+        prev = Eq
+        for k in keys:
+            va = a.get(k, 0)
+            vb = b.get(k, 0)
+            if prev == Eq:
+                if va > vb:
+                    prev = Gt
+                elif va < vb:
+                    prev = Lt
+            elif prev == Lt and va > vb:
+                return Cc
+            elif prev == Gt and va < vb:
+                return Cc
+        return prev
 
 
-# Example usage:
-# Create two AWORMap instances
-awor_map1 = AWORMap.zero()
-awor_map2 = AWORMap.zero()
+if __name__ == '__main__':
+    pncounter = PNCounter.zero()
+    pncounter = pncounter.inc('a', 5)
+    pncounter = pncounter.dec('a', 2)
+    print(pncounter.value())
 
-set1 = AWORSet()
-set1.add("replica1", "item1")
+    pncounter2 = PNCounter.zero()
+    pncounter2 = pncounter2.inc('b', 3)
+    pncounter2 = pncounter2.dec('b', 1)
+    pncounter2 = pncounter2.inc('a', 1)
+    print(pncounter2.value())
 
-set2 = AWORSet()
-set2.add("replica2", "item2")
+    pncounter3 = pncounter.merge(pncounter2)
+    print(pncounter3.value())
 
-# Add some entries to the maps
-awor_map1.add("replica1", "key1", set1)
-awor_map1.add("replica1", "key2", set2)
-awor_map2.add("replica2", "key1", AWORSet())
-awor_map2.add("replica2", "key3", AWORSet())
-
-# Merge the two AWORMap instances
-merged_awor_map = AWORMap.merge(awor_map1, awor_map2)
-
-# Print the merged entries
-print(merged_awor_map.value())
+    # test the gcounter idempotency
+    gcounter = GCounter.zero()
+    gcounter = gcounter.inc('a', 5)
+    gcounter = gcounter.inc('a', 5)
+    print(gcounter.value())
+    gcounter2 = GCounter({'a': 12}, {'a': 4})
+    gcounter3 = gcounter.merge(gcounter2)
+    gcounter3 = gcounter3.merge(gcounter2)
+    print(gcounter3.value())

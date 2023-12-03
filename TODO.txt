@@ -1,13 +1,19 @@
-- crdts direitos (PNCOunter??)
-- crdts usados pelas classes
+- compôr estrutura e nomenclatura. ou seja, os clientes chamam as funçóes de incremento de decremento do crdt
+depois apenas mandam o estado do seu crdt para ser escrito/mergido
 
-- memoria dos nodes?? sql, ficheiros??
+- fazer merges quando o cliente faz um get?
+- transformar pedidos do cliente em ações (delete é um dec, etc...)
 
-- comunicação entre nodes? são ambos dealers, já n sei se dá
-- queue de mensagens e depois tenta-se ler, adiciona-se à queue se houver nova mensagem e enquanto queue não vazia ir processando
-- guardar estado do servidor? dicionário com pedidos de quorums pedidos (tentativas, timeout, ...)?
-- meter quorums a dar com verificação de que o quorum é válido
-- para load balancing guardar histórico de nós requisitados?  e / ou ver um algoritmo de distribuição de carga
+- limitar decremento? pelo menos em value do PNCounter mostrar 0 no mínimo. se é 0 não deve aparecer na lista, então?
 
-- como adicionar e remover nodes durante a execução
-- cada node corre num ficheiro/processo/terminal à parte?
+- comunicação entre nodes? são ambos dealers, não parece dar
+- queue de mensagens?? pode n ser preciso, pelo menos o load balancer / router parece aguentar-se sem isso
+
+- meter quorums a verificar validez. é preciso haver concorância nos resultados. se não retorna-se ao cliente erro, volta-se a tentar??
+- guardar estado dos nodes à semelhança dos pedidos de quorum no load balancer?
+- para load balancing guardar histórico de nós requisitados?  e / ou ver um algoritmo de distribuição de carga. POUCO PRIORITÁRIO
+
+- adicionar e remover nodes durante a execução, => cada node corre terminal à parte em vez de serem threads (função listen())
+- local storage nodes e cliente. sql, ficheiros??
+- implica alterar hashring
+- cada node deve ter o seu hashring e haver gossip entre eles para atualizar os hashrings?
