@@ -14,6 +14,7 @@ import zmq
 import threading
 import asyncio
 
+from crdt_test import ShoppingList
 from utils import *
 
 N = 4
@@ -144,13 +145,22 @@ class Router:
 
 
     def listen(self, socket: zmq.Socket):
-        socketNode = DynamoNode(socket.IDENTITY.decode('utf-8'))
+        identity = socket.IDENTITY.decode('utf-8')
+        socket_node = DynamoNode(identity)
         # for DEBUG/DEV ONLY, TODO remove later
-        socketNode.store_data("key2", "value9")
+        socket_node.store_data("key2", 9)
+
+        # create new socket for message receiving
+        # router_socket = self._context.socket(zmq.ROUTER)
+        # router_socket.bind(identity)
+
+
         while True:
             # TODO usar polling ou selector para verificar/escolher se tem mensagens?
 
-            request = json.loads(socket.recv())
+            #  receve from either the router or the client, nowaits
+            request = socket.recv_json()
+
             key = request['key']
 
             # switch case on request type
@@ -160,7 +170,7 @@ class Router:
                     response = {
                         "type": MessageType.GET_RESPONSE,
                         "key": key,
-                        "value": socketNode.get_data(key),
+                        "value": socket_node.get_data(key),
                         "address": socket.IDENTITY.decode('utf-8'),
                         "quorum_id": request['quorum_id']
                     }
@@ -173,7 +183,7 @@ class Router:
                     response = {
                         "type": MessageType.PUT_RESPONSE,
                         "key": key,
-                        "value": socketNode.store_data(key, value),
+                        "value": socket_node.store_data(key, value),
                         "address": socket.IDENTITY.decode('utf-8'),
                         "quorum_id": request['quorum_id']
                     }
@@ -382,32 +392,17 @@ class Router:
 class DynamoNode:
     def __init__(self, name):
         self.name = name
-        self.data = {}
+        self.data: ShoppingList = ShoppingList.zero()
 
     def store_data(self, key, value):
-        self.data[key] = value
+        if value >= 0:
+            self.data = self.data.inc(key, self.name, value)
+        else:
+            self.data = self.data.dec(key, self.name, -value)
         return True # False if errors?
 
     def get_data(self, key):
-        return self.data.get(key)
-
-    def write_data_quorum(self, key, value, hash_ring, dynamo_nodes):
-        primary_node = hash_ring.get_node(key)
-        replicas = hash_ring.get_replica_nodes(primary_node)
-
-        write_responses = []
-        if self.name == primary_node:
-            self.store_data(key, value)
-            write_responses.append(True)
-
-        for replica in replicas:
-            replica_node = dynamo_nodes[replica]
-            if replica_node != primary_node:
-                replica_node.store_data(key, value)
-                write_responses.append(True)
-                # TODO message logic and confirmations of success
-
-        return len([r for r in write_responses if r]) >= W_QUORUM
+        return self.data.value(key)
 
 
 def store_data(key, value, hash_ring, dynamo_nodes):
@@ -467,7 +462,7 @@ async def main():
     # store_data("key3", "value3", hash_table.hash_ring, dynamo_nodes)
 
     key_to_lookup = "key2"
-    hash_table.write_data_quorum(key_to_lookup, "value4")
+    hash_table.write_data_quorum(key_to_lookup, 4)
     result = hash_table.read_data_quorum(key_to_lookup)
     print(f"---------------------------------------------------------------------------\nData for key '{key_to_lookup}' with quorum: {result}\n---------------------------------------------------------------------------")
 

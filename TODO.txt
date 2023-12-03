@@ -4,8 +4,6 @@
 - memoria dos nodes?? sql, ficheiros??
 
 - comunicação entre nodes? são ambos dealers, já n sei se dá
-- ciclo de receção de mensagens no router? e depois cada mensgaem tem um tipo ou até mais metadados para saber o que fazer com ela
-- nesse caso, como saber q determinadas mensagens são sobre um pedido de vários para formar um quorum? ids?
 - queue de mensagens e depois tenta-se ler, adiciona-se à queue se houver nova mensagem e enquanto queue não vazia ir processando
 - guardar estado do servidor? dicionário com pedidos de quorums pedidos (tentativas, timeout, ...)?
 - meter quorums a dar com verificação de que o quorum é válido
