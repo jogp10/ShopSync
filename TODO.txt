@@ -1,6 +1,8 @@
 - compôr estrutura e nomenclatura. ou seja, os clientes chamam as funçóes de incremento de decremento do crdt
 depois apenas mandam o estado do seu crdt para ser escrito/mergido
 
+- criar wrappers para send e receive
+
 - fazer merges quando o cliente faz um get?
 - transformar pedidos do cliente em ações (delete é um dec, etc...)
 

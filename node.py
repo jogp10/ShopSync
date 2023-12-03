@@ -5,7 +5,7 @@ import zmq
 
 from crdt import ShoppingListCRDT
 from hash_ring import HashRing
-from utils import MessageType, get_request_type, build_register_request
+from utils import MessageType, get_request_type, build_register_request, ROUTER_ADDRESS
 
 
 class DynamoNode:
@@ -35,7 +35,7 @@ if __name__ == "__main__":
 
     print(f"Node address: {node_address}")
 
-    router_address = "tcp://localhost:5554"  # todo change of more routers
+    router_address = ROUTER_ADDRESS # todo change if more routers
 
     # Create a new context and socket for the node
     context = zmq.Context()

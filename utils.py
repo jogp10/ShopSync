@@ -4,6 +4,9 @@ import uuid
 from enum import Enum, IntEnum
 
 
+ROUTER_ADDRESS = "tcp://localhost:5554"
+ROUTER_BIND_ADDRESS = "tcp://*:5554"
+
 class MessageType(IntEnum):
     GET = 1
     PUT = 2

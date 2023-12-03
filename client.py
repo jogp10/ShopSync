@@ -2,17 +2,19 @@
 
 import json
 import os
+import sys
 from uuid import uuid4
 
 import zmq
 
 from shopping_list import ShoppingList
+from utils import ROUTER_ADDRESS
 
 
 class Client:
     def __init__(self, server_address, username):
-        self.context = zmq.Context()
-        self.socket = self.context.socket(zmq.DEALER)
+        self._context = zmq.Context()
+        self.socket = self._context.socket(zmq.DEALER)
         self.socket.setsockopt(zmq.IDENTITY, username.encode('utf-8'))
         self.socket.connect(server_address)
         self.username = username
@@ -91,9 +93,16 @@ def show_available_lists(client: Client):
 
 
 if __name__ == "__main__":
-    server_address = "tcp://localhost:5554"
-    username = "client 1"
-    client = Client(server_address, username)
+    if len(sys.argv) != 2:
+        print("Usage: python client.py <port>")
+        sys.exit(1)
+
+    port = sys.argv[1]  # the identity can be anything, the port is not being used by the dealer socket
+    client_address = f"tcp://localhost:{port}"
+
+    server_address = ROUTER_ADDRESS
+    # username = "client 1"
+    client = Client(server_address, client_address)
     client.load_shopping_lists()
 
     # Get the value for the key "foo".
@@ -128,7 +137,7 @@ if __name__ == "__main__":
 
         elif choice == '4':
             list_id = input("Enter the ID of the shopping list: ")
-            #....
+            # ....
             print(f'Shopping list synced to DynamoDB.......')
 
         elif choice == '5':
@@ -136,10 +145,8 @@ if __name__ == "__main__":
             break
 
         else:
-           print("Invalid choice!")
-
+            print("Invalid choice!")
 
     print(value)
     client.store_shopping_lists_locally()
     client.store_shopping_list_in_online(client.shopping_lists[0])
-

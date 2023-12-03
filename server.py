@@ -123,7 +123,7 @@ class Router:
         self.read_quorum_requests_state = {}
         self.write_quorum_requests_state = {}
 
-        router_address = "tcp://*:5554"
+        router_address = ROUTER_BIND_ADDRESS
         self.router_socket = self._context.socket(zmq.ROUTER)
         self.router_socket.bind(router_address)
 
