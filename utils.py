@@ -10,6 +10,9 @@ class MessageType(IntEnum):
     DELETE = 3
     GET_RESPONSE = 4
     PUT_RESPONSE = 5
+    REGISTER = 6
+    REGISTER_RESPONSE = 7
+
 
 
 def build_get_request(key):
@@ -65,6 +68,20 @@ def build_quorum_request_state(nodes, timeout, max_retries, quorum_size):
         "quorum_size": quorum_size
     }
 
+
+def build_register_request(address):
+    """given an address, return a json for a register request of that address"""
+    return {
+        "type": MessageType.REGISTER,
+        "address": address
+    }
+
+def build_register_response(message):
+    """given an address, return a json for a register request of that address"""
+    return {
+        "type": MessageType.REGISTER_RESPONSE,
+        "message": message
+    }
 
 def get_quorum_value(values, quorum_size):
     """given a list values and a quorum size, return the value that appears in at least quorum_size values"""

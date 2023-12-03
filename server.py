@@ -4,6 +4,7 @@
 import hashlib
 import json
 import queue
+import sys
 import time
 from uuid import uuid4
 import matplotlib.pyplot as plt
@@ -13,6 +14,7 @@ import threading
 import asyncio
 
 from crdt import ShoppingListCRDT
+from node import DynamoNode
 from utils import *
 
 N = 4
@@ -108,13 +110,11 @@ class HashRing:
 
 class Router:
 
-    def __init__(self, nodes, replica_count=3):
+    def __init__(self, nodes=[], replica_count=3):
         self._context = zmq.Context()
         self.sockets = {}
         self.threads = {}
         self.nodes = nodes
-        # self.read_quorum = len(nodes) // 2 + 1
-        # self.write_quorum = len(nodes) // 2 + 1
         self.hash_ring = HashRing(nodes, replica_count)
         self.tasks_queue = queue.Queue()
         self.read_quorum_requests_state = {}
@@ -137,6 +137,10 @@ class Router:
 
             self.sockets[node] = socket
             self.threads[node] = thread
+
+    def add_node(self, node_address):
+        self.nodes.append(node_address)
+        self.hash_ring.add_node(node_address)
 
     def listen(self, socket: zmq.Socket):
         identity = socket.IDENTITY.decode('utf-8')
@@ -226,6 +230,15 @@ class Router:
                         print(task)
                         continue
 
+                case MessageType.REGISTER:
+                    print("REGISTER::Received a new node", task['address'])
+                    self.add_node(task['address'])
+                    # send a response to the node
+                    self.router_socket.send_multipart([task['address'].encode('utf-8'),
+                                                       json.dumps(build_register_response("ok")).encode('utf-8')])
+                    continue
+
+
     def expose(self):
         # Start a thread to listen for requests on the client socket.
         tasks_thread = threading.Thread(target=self.process_tasks,
@@ -240,10 +253,8 @@ class Router:
         while True:
             identity, message = self.router_socket.recv_multipart()
             json_request = json.loads(message)
-            if identity.decode('utf-8') in self.sockets:
-                if json_request['type'] == MessageType.GET_RESPONSE or json_request['type'] == MessageType.PUT_RESPONSE:
-                    self.tasks_queue.put(json_request)
-                    continue
+            if json_request['type'] == MessageType.GET_RESPONSE or json_request['type'] == MessageType.PUT_RESPONSE or json_request['type'] == MessageType.REGISTER:
+                self.tasks_queue.put(json_request)
                 continue
 
             request = message.decode('utf-8')
@@ -375,20 +386,6 @@ class Router:
         # TODO how to store each list???
 
 
-class DynamoNode:
-    def __init__(self, name):
-        self.name = name
-        self.data: ShoppingListCRDT = ShoppingListCRDT.zero()
-
-    def increment_item(self, key, value):
-        if value >= 0:
-            self.data = self.data.inc(key, self.name, value)
-        else:
-            self.data = self.data.dec(key, self.name, -value)
-        return True  # False if errors?
-
-    def get_data(self, key):
-        return self.data.value(key)
 
 
 def hash_ring_testing(hash_table):
@@ -398,43 +395,54 @@ def hash_ring_testing(hash_table):
     i = 0
     for node, keys in reversed_hash_table.items():
         plt.clf()
-        plt.plot([hash_table.sorted_keys.index(x) for x in keys], [int(x, 16) for x in keys], '.', label=node)
+        plt.plot([hash_table.hash_ring.sorted_keys.index(x) for x in keys], [int(x, 16) for x in keys], '.', label=node)
         plt.show()
     plt.clf()
     for node, keys in reversed_hash_table.items():
-        plt.plot([hash_table.sorted_keys.index(x) for x in keys], [int(x, 16) for x in keys], '.', label=node)
+        plt.plot([hash_table.hash_ring.sorted_keys.index(x) for x in keys], [int(x, 16) for x in keys], '.', label=node)
     plt.show()
     positions = []
     # for 1000 random strings of length 10, plot the distribution of the positions of the got node in the ring
     for i in range(100000):
         key = str(uuid4())
-        positions.append(hash_table.get_node_pos(key))
+        positions.append(hash_table.hash_ring.get_node_pos(key))
         # print(get_node_pos(key))
-    l = len(hash_table.sorted_keys)
+    l = len(hash_table.hash_ring.sorted_keys)
     plt.clf()
     plt.hist(positions, bins=l)
     plt.show()
     print('Plotting done')
 
 
-async def main():
+def main():
     nodes = [
         "tcp://localhost:5555",
         "tcp://localhost:5556",
         "tcp://localhost:5557",
         "tcp://localhost:5558",
     ]
-    hash_table = Router(nodes, 24)
+    hash_table = Router(replica_count=24)
     hash_table.expose()
 
-    key_to_lookup = "key2"
-    hash_table.write_data_quorum(key_to_lookup, 4)
-    result = hash_table.read_data_quorum(key_to_lookup)
-    print(
-        f"---------------------------------------------------------------------------"
-        f"\nData for key '{key_to_lookup}' with quorum: {result}\n"
-        f"---------------------------------------------------------------------------\n")
+    print(f"Current encoding: {sys.stdin.encoding}")
+    # change to latin-1
+    sys.stdin = open(sys.stdin.fileno(), mode='r', encoding='latin-1', buffering=True)
+
+
+    if input('Test the hash ring? (y/n) ').lower() == 'y':
+        hash_ring_testing(hash_table)
+
+
+    if input('Test quorums? (y/n) ').lower() == 'y':
+        key_to_lookup = "key2"
+        hash_table.write_data_quorum(key_to_lookup, 4)
+        result = hash_table.read_data_quorum(key_to_lookup)
+        print(
+            f"---------------------------------------------------------------------------"
+            f"\nData for key '{key_to_lookup}' with quorum: {result}\n"
+            f"---------------------------------------------------------------------------\n")
 
 
 if __name__ == "__main__":
-    asyncio.run(main())
+    # asyncio.run(main())
+    main()

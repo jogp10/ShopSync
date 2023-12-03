@@ -94,7 +94,7 @@ class PNCounter:
 
     # @property
     def value(self):
-        return GCounter.value(self.inc_counter) - GCounter.value(self.dec_counter)
+        return max(GCounter.value(self.inc_counter) - GCounter.value(self.dec_counter), 0)
 
     def inc(self, replica, value):
         return PNCounter(GCounter.inc(self.inc_counter, replica, value), self.dec_counter)

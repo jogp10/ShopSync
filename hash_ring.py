@@ -73,41 +73,43 @@ class HashRing:
         for key in self.sorted_keys:
             print(f"{key}: {self.ring[key]}")
 
-# Example usage:
-nodes = ["node1", "node2", "node3"]
-hash_ring = HashRing(nodes=nodes, replica_count=3)
-hash_ring.print_ring()
 
-# Add a new node to the ring
-new_node = "node4"
-hash_ring.add_node(new_node)
-print(f"\nAfter adding {new_node}:")
-hash_ring.print_ring()
+if __name__ == "__main__":
+    # Example usage:
+    nodes = ["node1", "node2", "node3"]
+    hash_ring = HashRing(nodes=nodes, replica_count=3)
+    hash_ring.print_ring()
 
-# Remove a node from the ring
-removed_node = "node2"
-hash_ring.remove_node(removed_node)
-print(f"\nAfter removing {removed_node}:")
-hash_ring.print_ring()
+    # Add a new node to the ring
+    new_node = "node4"
+    hash_ring.add_node(new_node)
+    print(f"\nAfter adding {new_node}:")
+    hash_ring.print_ring()
 
-# Get node for a key
-key_to_lookup = "example_key"
-node_for_key = hash_ring.get_node(key_to_lookup)
-print(f"\nNode for key '{key_to_lookup}': {node_for_key}")
+    # Remove a node from the ring
+    removed_node = "node2"
+    hash_ring.remove_node(removed_node)
+    print(f"\nAfter removing {removed_node}:")
+    hash_ring.print_ring()
+
+    # Get node for a key
+    key_to_lookup = "example_key"
+    node_for_key = hash_ring.get_node(key_to_lookup)
+    print(f"\nNode for key '{key_to_lookup}': {node_for_key}")
 
 
-# create a new hash ring with 8 nodes
-nodes = [f"node{i}" for i in range(8)]
-hash_ring2 = HashRing(nodes=nodes, replica_count=24)
+    # create a new hash ring with 8 nodes
+    nodes = [f"node{i}" for i in range(8)]
+    hash_ring2 = HashRing(nodes=nodes, replica_count=24)
 
-positions = []
-for i in range(10000):
-    key = uuid.uuid4().hex
-    pos = hash_ring2.get_node_pos(key)
-    positions.append(pos)
+    positions = []
+    for i in range(10000):
+        key = uuid.uuid4().hex
+        pos = hash_ring2.get_node_pos(key)
+        positions.append(pos)
 
-plt.hist(positions, bins=len(hash_ring2.sorted_keys))
-plt.show()
-# print the position that appears the most
-print(max(set(positions), key=positions.count))
-print('Plotting done')
+    plt.hist(positions, bins=len(hash_ring2.sorted_keys))
+    plt.show()
+    # print the position that appears the most
+    print(max(set(positions), key=positions.count))
+    print('Plotting done')
