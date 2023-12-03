@@ -94,6 +94,14 @@ if __name__ == "__main__":
                 # print(request)
                 continue
 
+            case MessageType.HEARTBEAT:
+                response = {
+                    "type": MessageType.HEARTBEAT_RESPONSE,
+                    "address": node_socket.IDENTITY.decode('utf-8')
+                }
+                node_socket.send_json(response)
+                continue
+
         # request = socket.recv( zmq.NOBLOCK
         # Receive the response from the appropriate node using the ZeroMQ socket for that node.
 

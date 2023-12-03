@@ -12,6 +12,8 @@ class MessageType(IntEnum):
     PUT_RESPONSE = 5
     REGISTER = 6
     REGISTER_RESPONSE = 7
+    HEARTBEAT = 8
+    HEARTBEAT_RESPONSE = 9
 
 
 
@@ -82,6 +84,19 @@ def build_register_response(message):
         "type": MessageType.REGISTER_RESPONSE,
         "message": message
     }
+
+def build_heartbeat_request():
+    """return a json for a heartbeat request"""
+    return {
+        "type": MessageType.HEARTBEAT,
+    }
+
+def build_heartbeat_response():
+    """return a json for a heartbeat response"""
+    return {
+        "type": MessageType.HEARTBEAT_RESPONSE,
+    }
+
 
 def get_quorum_value(values, quorum_size):
     """given a list values and a quorum size, return the value that appears in at least quorum_size values"""

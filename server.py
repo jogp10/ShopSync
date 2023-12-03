@@ -20,7 +20,8 @@ from utils import *
 N = 4
 R_QUORUM = 2
 W_QUORUM = 3
-
+MONITOR_INTERVAL = 3
+TIMEOUT_THRESHOLD = 5
 
 class HashRing:
     def __init__(self, nodes, replica_count):
@@ -89,6 +90,7 @@ class HashRing:
         return hashlib.sha256(key.encode()).hexdigest()
 
     def add_node(self, node):
+        # TODO probably more to do here
         for i in range(self.replica_count):
             key = self.get_node_key(node, i)
             self.ring[key] = node
@@ -115,6 +117,7 @@ class Router:
         self.sockets = {}
         self.threads = {}
         self.nodes = nodes
+        self.activity = {} # for heartbeats and potentially other things
         self.hash_ring = HashRing(nodes, replica_count)
         self.tasks_queue = queue.Queue()
         self.read_quorum_requests_state = {}
@@ -137,10 +140,18 @@ class Router:
 
             self.sockets[node] = socket
             self.threads[node] = thread
+            self.activity[node]['last_time_active'] = time.time()
 
     def add_node(self, node_address):
         self.nodes.append(node_address)
         self.hash_ring.add_node(node_address)
+        self.activity[node_address] = {}
+        self.activity[node_address]['last_time_active'] = time.time()
+
+    def remove_node(self, node_address):
+        self.nodes.remove(node_address)
+        self.hash_ring.remove_node(node_address)
+        self.activity.pop(node_address)
 
     def listen(self, socket: zmq.Socket):
         identity = socket.IDENTITY.decode('utf-8')
@@ -238,6 +249,25 @@ class Router:
                                                        json.dumps(build_register_response("ok")).encode('utf-8')])
                     continue
 
+    def monitor_nodes(self):
+        # Periodically check for node heartbeats
+        while True:
+            current_time = time.time()
+            for node, info in list(self.activity.items()):
+                last_time_active = info['last_time_active']
+                if current_time - last_time_active > TIMEOUT_THRESHOLD:
+                    # Node is considered down
+                    print(f"Node {node} is down.")
+                    self.remove_node(node)
+                else:
+                    print(f"Node {node} is up.") # delete this later
+
+            # Sleep for a short interval before the next check
+            time.sleep(MONITOR_INTERVAL)
+
+    #         send a heartbeat to all nodes
+            for node in self.nodes:
+                self.router_socket.send_multipart([node.encode('utf-8'), json.dumps(build_heartbeat_request()).encode('utf-8')])
 
     def expose(self):
         # Start a thread to listen for requests on the client socket.
@@ -249,12 +279,20 @@ class Router:
         main_thread = threading.Thread(target=self.listen_for_client_requests)
         main_thread.start()
 
+        monitor_thread = threading.Thread(target=self.monitor_nodes)
+        monitor_thread.start()
+
     def listen_for_client_requests(self):
         while True:
             identity, message = self.router_socket.recv_multipart()
             json_request = json.loads(message)
-            if json_request['type'] == MessageType.GET_RESPONSE or json_request['type'] == MessageType.PUT_RESPONSE or json_request['type'] == MessageType.REGISTER:
-                self.tasks_queue.put(json_request)
+            if (json_request['type'] == MessageType.GET_RESPONSE or json_request['type'] == MessageType.PUT_RESPONSE
+                    or json_request['type'] == MessageType.REGISTER or json_request['type'] == MessageType.HEARTBEAT_RESPONSE):
+
+                if json_request['type'] != MessageType.REGISTER:
+                    self.activity[identity.decode('utf-8')]['last_time_active'] = time.time()
+                if json_request['type'] != MessageType.HEARTBEAT_RESPONSE:
+                    self.tasks_queue.put(json_request)
                 continue
 
             request = message.decode('utf-8')

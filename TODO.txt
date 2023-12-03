@@ -13,7 +13,5 @@ depois apenas mandam o estado do seu crdt para ser escrito/mergido
 - guardar estado dos nodes à semelhança dos pedidos de quorum no load balancer?
 - para load balancing guardar histórico de nós requisitados?  e / ou ver um algoritmo de distribuição de carga. POUCO PRIORITÁRIO
 
-- adicionar e remover nodes durante a execução, => cada node corre terminal à parte em vez de serem threads (função listen())
 - local storage nodes e cliente. sql, ficheiros??
-- implica alterar hashring
 - cada node deve ter o seu hashring e haver gossip entre eles para atualizar os hashrings?
