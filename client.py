@@ -39,29 +39,31 @@ class Client:
 
         return value
 
-    def create_shopping_list(self, name: str, items: dict[str, int] = None):
+    def create_shopping_list(self, name: str, items: list[tuple[str, int]] = None):
         id = str(uuid4())
-        shopping_list = ShoppingList(id, name, items)
+        shopping_list = ShoppingList(id, name, items, self.username)
         self.shopping_lists.append(shopping_list)
-
         return shopping_list
 
-    def load_shopping_lists(self):
-        if not os.path.exists('lists/' + self.username.replace(' ', '_')):
-            os.makedirs('lists/' + self.username.replace(' ', '_'))
-        for filename in os.listdir('lists/' + self.username.replace(' ', '_')):
+    def load_local_shopping_lists(self):
+        transformed_username = self.username.replace(' ', '_').replace(":", "_").replace("/", "-")
+        if not os.path.exists('lists/' + transformed_username):
+            os.makedirs('lists/' + transformed_username)
+        for filename in os.listdir('lists/' + transformed_username):
             if filename.endswith('.json'):
-                with open(f'lists/{self.username.replace(" ", "_")}/{filename}', 'r') as f:
+                with open(f'lists/{transformed_username}/{filename}', 'r') as f:
                     shopping_list = json.load(f)
-                id = shopping_list['id']
-                name = shopping_list['name']
-                items = shopping_list['items']
-                self.shopping_lists.append(ShoppingList(id, name, items))
+                self.shopping_lists.append(ShoppingList.from_dict(shopping_list))
+                print(f'Loaded shopping list {shopping_list["name"]} from local storage.')
+                print(self.shopping_lists[-1])
 
     def store_shopping_lists_locally(self):
+        transformed_username = self.username.replace(' ', '_').replace(":", "_").replace("/", "-")
+        if not os.path.exists('lists/' + transformed_username):
+            os.makedirs('lists/' + transformed_username)
         for shopping_list in self.shopping_lists:
-            with open(f'lists/{self.username.replace(" ", "_")}/{shopping_list.id}.json', 'w') as f:
-                json.dump(shopping_list.to_dict(), f)
+            with open(f'lists/{transformed_username}/{shopping_list.id}.json', 'w') as f:
+                json.dump(shopping_list, indent=2, default=lambda x: x.__dict__, fp=f)
 
     def store_shopping_list_in_online(self, shopping_list: ShoppingList):
         s_list = shopping_list.to_dict()
@@ -75,12 +77,12 @@ class Client:
 
 
 def ask_for_items():
-    items = {}
+    items = []
     while True:
         name = input("Enter an item (or press Enter to finish): ").strip()
         if name:
             quantity = int(input("Enter the quantity: "))
-            items[name] = quantity
+            items.append((name, quantity))
         else:
             break
     return items
@@ -103,10 +105,10 @@ if __name__ == "__main__":
     server_address = ROUTER_ADDRESS
     # username = "client 1"
     client = Client(server_address, client_address)
-    client.load_shopping_lists()
+    client.load_local_shopping_lists()
 
     # Get the value for the key "foo".
-    value = client.get("fooo")
+    # value = client.get("fooo")
 
     while True:
         print("1. Create Shopping List")
@@ -129,7 +131,7 @@ if __name__ == "__main__":
             shopping_list: ShoppingList = client.shopping_lists[list_index]
             item = input("Enter the item to add: ")
             quantity = int(input("Enter the quantity: "))
-            shopping_list.add_item((item, quantity))
+            shopping_list.add_item((item, quantity), client.username)
             print(f'Shopping list updated')
 
         elif choice == '3':
@@ -147,6 +149,5 @@ if __name__ == "__main__":
         else:
             print("Invalid choice!")
 
-    print(value)
     client.store_shopping_lists_locally()
-    client.store_shopping_list_in_online(client.shopping_lists[0])
+    # client.store_shopping_list_in_online(client.shopping_lists[0])

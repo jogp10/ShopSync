@@ -1,5 +1,7 @@
+import json
 from typing import Dict
 from collections import defaultdict
+import ast
 
 ReplicaId = str
 
@@ -14,9 +16,17 @@ class GCounter:
         self.counter_map = counter_map
         self.replica_clock = defaultdict(int) if replica_clock is None else replica_clock
 
+
     @staticmethod
     def zero():
         return GCounter({}, {})
+
+    @staticmethod
+    def from_dict(d):
+        return GCounter(d['counter_map'], d['replica_clock'])
+
+    def __repr__(self):
+        return f"GCounter(value={self.value()}, counter_map={self.counter_map}, replica_clock={self.replica_clock})"
 
     # @property
     def value(self):
@@ -88,6 +98,9 @@ class PNCounter:
         self.inc_counter = inc
         self.dec_counter = dec
 
+    def __repr__(self):
+        return f"PNCounter(value={self.value()}, inc={self.inc_counter}, dec={self.dec_counter})"
+
     @staticmethod
     def zero():
         return PNCounter(GCounter.zero(), GCounter.zero())
@@ -111,12 +124,15 @@ class PNCounter:
 class ShoppingListCRDT:
     """This is essentially a PNCounterMap"""
 
+    def __repr__(self):
+        return f"ShoppingListCRDT(counters={self.counters})"
+
     @staticmethod
     def zero():
         return ShoppingListCRDT({})
 
     def __init__(self, counters):
-        self.counters = counters
+        self.counters: Dict[str, PNCounter] = counters
 
     def get_or_create(self, id):
         if id not in self.counters:
@@ -124,12 +140,14 @@ class ShoppingListCRDT:
         return self.counters[id]
 
     def inc(self, id, replica, value):
+        assert value >= 0
         counter = self.get_or_create(id)
         updated_counters = self.counters.copy()
         updated_counters.update({id: counter.inc(replica, value)})
         return ShoppingListCRDT(updated_counters)
 
     def dec(self, id, replica, value):
+        assert value >= 0
         counter = self.get_or_create(id)
         updated_counters = self.counters.copy()
         updated_counters.update({id: counter.dec(replica, value)})
@@ -149,6 +167,18 @@ class ShoppingListCRDT:
 
     def value(self, key):
         return self.get_or_create(key).value()
+
+    def delete(self, key):
+#         decrement by the current value
+        counter = self.get_or_create(key)
+        updated_counters = self.counters.copy()
+        updated_counters.update({key: counter.dec(key, counter.value())})
+        return ShoppingListCRDT(updated_counters)
+
+    @staticmethod
+    def from_dict(counters):
+        counters = {k: PNCounter(GCounter.from_dict(v['inc_counter']), GCounter.from_dict(v['dec_counter'])) for k, v in counters['counters'].items()}
+        return ShoppingListCRDT(counters)
 
 
 # """Things that are not actually used but may serve as inspiration for any tweaks"""

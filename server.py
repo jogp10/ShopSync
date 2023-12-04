@@ -154,6 +154,7 @@ class Router:
         self.activity.pop(node_address)
 
     def listen(self, socket: zmq.Socket):
+        # this function is stll here at the moment in case it easier to test multiple nodes as threads
         identity = socket.IDENTITY.decode('utf-8')
         socket_node = DynamoNode(identity)
         # for DEBUG/DEV ONLY, TODO remove later
