@@ -415,15 +415,6 @@ def main():
     if input('Test the hash ring? (y/n) ').lower() == 'y':
         hash_ring_testing(hash_table)
 
-    if input('Test quorums? (y/n) ').lower() == 'y':
-        key_to_lookup = "key2"
-        hash_table.write_data_quorum(key_to_lookup, 4)
-        result = hash_table.read_data_quorum(key_to_lookup)
-        print(
-            f"---------------------------------------------------------------------------"
-            f"\nData for key '{key_to_lookup}' with quorum: {result}\n"
-            f"---------------------------------------------------------------------------\n")
-
 
 if __name__ == "__main__":
     # asyncio.run(main())
