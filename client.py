@@ -84,7 +84,16 @@ class Client:
         response = self.socket.recv_json()
         print(response)
 
-         #todo
+         # TODO: USE THIS TO UPDATE THE LOCAL SHOPPING LIST
+
+    def delete_shopping_list(self, list_id):
+        request = {
+            "type": MessageType.DELETE,
+            "key": list_id
+        }
+        self.socket.send_json(request, zmq.NOBLOCK)
+        response = self.socket.recv_json()
+        print(response)
 
 def ask_for_items():
     items = []
@@ -137,13 +146,16 @@ if __name__ == "__main__":
         print("2. Add Item to Shopping List")
         print("3. List Available Shopping Lists")
         print("4. Change Item Quantity")
-        print("5. Sync Shopping List to Cloud")
+        print("5. Print Shopping List")
+        print("6. Sync Shopping List to Cloud")
 
         # TODO opção que vá buscar uma lista ao servidor por id
 
-        print("6. Load Shopping List from Cloud")
+        print("7. Load Shopping List from Cloud")
+        print("8. Delete Shopping List Permanently")
 
-        print("\n0. Quit")
+        print("\n9. Quit and store shopping lists")
+        print("0. Quit")
         choice = input("Enter your choice: ").strip().lower()
 
         if choice == '1':
@@ -159,7 +171,13 @@ if __name__ == "__main__":
         
             shopping_list: ShoppingList = client.shopping_lists[list_index]
                     
-            item = input("Enter the item to add: ")
+            while True:
+                item = input("Enter the item to add: ")
+
+                if shopping_list.item_exists(item):
+                    print("Item already exists!")
+                    continue
+                break
 
             quantity = get_int_from_user("Enter the quantity: ")
 
@@ -178,23 +196,61 @@ if __name__ == "__main__":
             shopping_list: ShoppingList = client.shopping_lists[list_index]
             shopping_list.print_items()
 
-            item = input("Enter the item to change: ")
+            if shopping_list.get_number_of_items() == 0:
+                print("No items available!")
+                continue
+
+            while True:
+                item = input("Enter the item to change: ")
+                #Check if item exists
+                if not shopping_list.item_exists(item):
+                    print("Item does not exist!")
+                    continue
+                break
             
             quantity = get_int_from_user("Enter the increase or decrease value: ")
             shopping_list.change_item_quantity((item, quantity), client.username)
-
+        
         elif choice == '5':
+            (min, max) = show_available_lists(client)
+
+            list_index = get_int_from_user("Enter the number of the shopping list to print: ", min, max) - 1
+            shopping_list: ShoppingList = client.shopping_lists[list_index]
+            shopping_list.print_items()
+
+        elif choice == '6':
             (min, max) = show_available_lists(client)
 
             list_index = get_int_from_user("Enter the number of the shopping list to sync to the cloud: ", min, max) - 1
             shopping_list: ShoppingList = client.shopping_lists[list_index]
             client.store_shopping_list_online(shopping_list)
 
-        elif choice == '6':
+        elif choice == '7':
             list_id = input("Enter the id of the shopping list to load from the cloud: ")
             client.fetch_shopping_list(list_id)
 
             # uou can try 'lista1'
+
+        elif choice == '8':
+            (min, max) = show_available_lists(client)
+
+            list_index = get_int_from_user("Enter the number of the shopping list to delete permanently: ", min, max) - 1
+            shopping_list: ShoppingList = client.shopping_lists[list_index]
+            client.shopping_lists.remove(shopping_list)
+
+            # TODO: delete from cloud, CHECK IF WORKS
+            client.delete_shopping_list(shopping_list.id)
+
+            print(f'Shopping list deleted: {shopping_list.name}')
+
+        elif choice == '9':
+            # Store all shopping lists to cloud
+            for shopping_list in client.shopping_lists:
+                print("Stroring shopping list" + shopping_list.name + "to cloud...")
+                client.store_shopping_list_online(shopping_list)
+
+            print("Goodbye!")
+            break
 
         elif choice == '0':
             print("Goodbye!")

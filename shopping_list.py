@@ -24,6 +24,9 @@ class ShoppingList:
 
     def __repr__(self):
         return f"ShoppingList(name={self.name}, id={self.id}, items={self.items})"
+    
+    def item_exists(self, item_name: str):
+        return item_name in [item_name for item_name in self.items.counters]
 
     def add_item(self, item: tuple[str, int], replica_id: str):
         if item[0] in [item_name for item_name in self.items.counters]:
@@ -44,6 +47,9 @@ class ShoppingList:
             self.items = self.items.inc(item[0], replica_id, item[1])
         else:
             self.items = self.items.dec(item[0], replica_id, -item[1])
+
+    def get_number_of_items(self):
+        return len(self.items.counters)
 
     # convert to a json serializable dict
     def to_dict(self):
