@@ -1,9 +1,10 @@
+NOTA: há mais todos pelo código que não estão aqui
+
 - compôr estrutura e nomenclatura. ou seja, os clientes chamam as funçóes de incremento de decremento do crdt
 depois apenas mandam o estado do seu crdt para ser escrito/mergido
 
 - criar wrappers para send e receive
 
-- fazer merges quando o cliente faz um get?
 - transformar pedidos do cliente em ações (delete é um dec, etc...)
 
 - limitar decremento? pelo menos em value do PNCounter mostrar 0 no mínimo. se é 0 não deve aparecer na lista, então?

@@ -8,7 +8,7 @@ from uuid import uuid4
 import zmq
 
 from shopping_list import ShoppingList
-from utils import ROUTER_ADDRESS
+from utils import ROUTER_ADDRESS, MessageType
 
 
 class Client:
@@ -55,7 +55,7 @@ class Client:
                     shopping_list = json.load(f)
                 self.shopping_lists.append(ShoppingList.from_dict(shopping_list))
                 print(f'Loaded shopping list {shopping_list["name"]} from local storage.')
-                print(self.shopping_lists[-1])
+                print(self.shopping_lists[-1], '\n\n')
 
     def store_shopping_lists_locally(self):
         transformed_username = self.username.replace(' ', '_').replace(":", "_").replace("/", "-")
@@ -65,16 +65,26 @@ class Client:
             with open(f'lists/{transformed_username}/{shopping_list.id}.json', 'w') as f:
                 json.dump(shopping_list, indent=2, default=lambda x: x.__dict__, fp=f)
 
-    def store_shopping_list_in_online(self, shopping_list: ShoppingList):
-        s_list = shopping_list.to_dict()
+    def store_shopping_list_online(self, shopping_list: ShoppingList):
         request = {
-            "type": 'put',
-            "shopping_list": s_list
+            "type": MessageType.PUT,
+            "shopping_list": json.dumps(shopping_list, default=lambda x: x.__dict__)
         }
         self.socket.send_json(request, zmq.NOBLOCK)
         response = self.socket.recv_json()
         print(response)
 
+    def fetch_shopping_list(self, list_id):
+        request = {
+            "type": MessageType.GET,
+            "key": list_id
+        }
+
+        self.socket.send_json(request, zmq.NOBLOCK)
+        response = self.socket.recv_json()
+        print(response)
+
+         #todo
 
 def ask_for_items():
     items = []
@@ -107,15 +117,19 @@ if __name__ == "__main__":
     client = Client(server_address, client_address)
     client.load_local_shopping_lists()
 
-    # Get the value for the key "foo".
-    # value = client.get("fooo")
 
     while True:
         print("1. Create Shopping List")
         print("2. Add Item to Shopping List")
         print("3. List Available Shopping Lists")
-        # print("4. Sync Shopping List to Cloud (DynamoDB)")
-        print("5. Quit")
+        print("4. Change Item Quantity")
+        print("5. Sync Shopping List to Cloud")
+
+        # TODO opção que vá buscar uma lista ao servidor por id
+
+        print("6. Load Shopping List from Cloud")
+
+        print("\n0. Quit")
         choice = input("Enter your choice: ").strip().lower()
 
         if choice == '1':
@@ -138,11 +152,30 @@ if __name__ == "__main__":
             show_available_lists(client)
 
         elif choice == '4':
-            list_id = input("Enter the ID of the shopping list: ")
-            # ....
-            print(f'Shopping list synced to DynamoDB.......')
+            show_available_lists(client)
+
+            list_index = int(input("Enter the number of the shopping list to which you want to alter an item: ")) - 1
+            shopping_list: ShoppingList = client.shopping_lists[list_index]
+            shopping_list.print_items()
+
+            item = input("Enter the item to change: ")
+            quantity = int(input("Enter the increase or decrease value: "))
+            shopping_list.change_item_quantity((item, quantity), client.username)
 
         elif choice == '5':
+            show_available_lists(client)
+
+            list_index = int(input("Enter the number of the shopping list to sync to the cloud: ")) - 1
+            shopping_list: ShoppingList = client.shopping_lists[list_index]
+            client.store_shopping_list_online(shopping_list)
+
+        elif choice == '6':
+            list_id = input("Enter the id of the shopping list to load from the cloud: ")
+            client.fetch_shopping_list(list_id)
+
+            # uou can try 'lista1'
+
+        elif choice == '0':
             print("Goodbye!")
             break
 
@@ -150,4 +183,3 @@ if __name__ == "__main__":
             print("Invalid choice!")
 
     client.store_shopping_lists_locally()
-    # client.store_shopping_list_in_online(client.shopping_lists[0])

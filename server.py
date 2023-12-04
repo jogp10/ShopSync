@@ -15,13 +15,15 @@ import asyncio
 
 from crdt import ShoppingListCRDT
 from node import DynamoNode
+from shopping_list import ShoppingList
 from utils import *
 
 N = 4
 R_QUORUM = 2
 W_QUORUM = 3
 MONITOR_INTERVAL = 3
-TIMEOUT_THRESHOLD = 5
+TIMEOUT_THRESHOLD = 500  # usually 5 seconds but while debugging it's easier to use a larger value else the nodes are considered down too quickly if the main server thrwad does not update heartbeats
+
 
 class HashRing:
     def __init__(self, nodes, replica_count):
@@ -117,9 +119,10 @@ class Router:
         self.sockets = {}
         self.threads = {}
         self.nodes = nodes
-        self.activity = {} # for heartbeats and potentially other things
+        self.activity = {}  # for heartbeats and potentially other things
         self.hash_ring = HashRing(nodes, replica_count)
         self.tasks_queue = queue.Queue()
+        self.heavy_tasks_queue = queue.Queue()  # todo ter os nós a coordenar os quorums evita esta queue
         self.read_quorum_requests_state = {}
         self.write_quorum_requests_state = {}
 
@@ -155,57 +158,9 @@ class Router:
 
     def listen(self, socket: zmq.Socket):
         # this function is stll here at the moment in case it easier to test multiple nodes as threads
+        # dont delete just yet
         identity = socket.IDENTITY.decode('utf-8')
         socket_node = DynamoNode(identity)
-        # for DEBUG/DEV ONLY, TODO remove later
-        socket_node.increment_item("key2", 9)
-
-        # create new socket for message receiving
-        # router_socket = self._context.socket(zmq.ROUTER)
-        # router_socket.bind(identity)
-
-        while True:
-            # TODO usar polling ou selector para verificar/escolher se tem mensagens?
-
-            #  receve from either the router or the client, nowaits
-            request = socket.recv_json()
-
-            key = request['key']
-
-            # switch case on request type
-            match get_request_type(request):
-
-                case MessageType.GET:
-                    response = {
-                        "type": MessageType.GET_RESPONSE,
-                        "key": key,
-                        "value": socket_node.get_data(key),
-                        "address": socket.IDENTITY.decode('utf-8'),
-                        "quorum_id": request['quorum_id']
-                    }
-                    # time.sleep(1)
-                    socket.send_json(response)
-                    continue
-
-                case MessageType.PUT:
-                    value = request['value']
-                    response = {
-                        "type": MessageType.PUT_RESPONSE,
-                        "key": key,
-                        "value": socket_node.increment_item(key, value),
-                        "address": socket.IDENTITY.decode('utf-8'),
-                        "quorum_id": request['quorum_id']
-                    }
-                    # time.sleep(1)
-                    socket.send_json(response)
-                    continue
-
-            # request = socket.recv( zmq.NOBLOCK
-            # Receive the response from the appropriate node using the ZeroMQ socket for that node.
-
-            # Send the response to the client.
-
-            socket.send(json.dumps({key: "bar"}).encode('utf-8'))
 
     def process_tasks(self, tasks_queue, read_quorum_requests_state, write_quorum_requests_state):
         """For requests and replies between the router and server nodes"""
@@ -224,6 +179,8 @@ class Router:
                             read_quorum_requests_state[request_id]['nodes_with_reply'].add(task['address'])
                             read_quorum_requests_state[request_id]['responses'].append(task['value'])
                             read_quorum_requests_state[request_id]['retry_info'][task['address']] += 1
+
+                            print("GET::Received a new response", task['value'])
                     else:
                         print("GET::Received a response for a request that was already processed")
                         continue
@@ -250,6 +207,27 @@ class Router:
                                                        json.dumps(build_register_response("ok")).encode('utf-8')])
                     continue
 
+    def process_heavy_tasks(self, tasks_queue):
+        """For requests and replies between the router and server nodes"""
+        while True:
+            task = tasks_queue.get()
+            if task is None:
+                break
+
+            match get_request_type(task):
+                case MessageType.PUT:
+                    shopping_list = task['shopping_list']
+                    shopping_list = ShoppingList.from_dict(json.loads(shopping_list))
+                    response = self.put(shopping_list)
+                    self.router_socket.send_multipart(
+                        [task['address'].encode('utf-8'), json.dumps(response).encode('utf-8')])
+
+                case MessageType.GET:
+                    key = task['key']
+                    response = self.get(key)
+                    self.router_socket.send_multipart(
+                        [task['address'].encode('utf-8'), json.dumps(response).encode('utf-8')])
+
     def monitor_nodes(self):
         # Periodically check for node heartbeats
         while True:
@@ -261,14 +239,16 @@ class Router:
                     print(f"Node {node} is down.")
                     self.remove_node(node)
                 else:
-                    print(f"Node {node} is up.") # delete this later
+                    pass
+                    # print(f"Node {node} is up.") # delete this later
 
             # Sleep for a short interval before the next check
             time.sleep(MONITOR_INTERVAL)
 
-    #         send a heartbeat to all nodes
+            #         send a heartbeat to all nodes
             for node in self.nodes:
-                self.router_socket.send_multipart([node.encode('utf-8'), json.dumps(build_heartbeat_request()).encode('utf-8')])
+                self.router_socket.send_multipart(
+                    [node.encode('utf-8'), json.dumps(build_heartbeat_request()).encode('utf-8')])
 
     def expose(self):
         # Start a thread to listen for requests on the client socket.
@@ -276,6 +256,11 @@ class Router:
                                         args=(self.tasks_queue, self.read_quorum_requests_state,
                                               self.write_quorum_requests_state))
         tasks_thread.start()
+
+        heavy_tasks_thread = threading.Thread(target=self.process_heavy_tasks,
+                                              args=(self.heavy_tasks_queue,))
+
+        heavy_tasks_thread.start()
 
         main_thread = threading.Thread(target=self.listen_for_client_requests)
         main_thread.start()
@@ -287,39 +272,24 @@ class Router:
         while True:
             identity, message = self.router_socket.recv_multipart()
             json_request = json.loads(message)
+            print(json_request)
             if (json_request['type'] == MessageType.GET_RESPONSE or json_request['type'] == MessageType.PUT_RESPONSE
-                    or json_request['type'] == MessageType.REGISTER or json_request['type'] == MessageType.HEARTBEAT_RESPONSE):
+                    or json_request['type'] == MessageType.REGISTER or json_request[
+                        'type'] == MessageType.HEARTBEAT_RESPONSE
+                    or json_request['type'] == MessageType.PUT  # put sent by a client
+                    or json_request['type'] == MessageType.GET):
+
 
                 if json_request['type'] != MessageType.REGISTER:
+                    self.activity[identity.decode('utf-8')] = {}
                     self.activity[identity.decode('utf-8')]['last_time_active'] = time.time()
-                if json_request['type'] != MessageType.HEARTBEAT_RESPONSE:
+                if json_request['type'] == MessageType.PUT or json_request['type'] == MessageType.GET:
+                    print("PUT/GET::Received a new request")
+                    json_request['address'] = identity.decode('utf-8')
+                    self.heavy_tasks_queue.put(json_request)
+                elif json_request['type'] != MessageType.HEARTBEAT_RESPONSE:
                     self.tasks_queue.put(json_request)
                 continue
-
-            request = message.decode('utf-8')
-
-            # planning more cases, but only get for now
-            # assume request is a json with key and request type
-            if json_request['type'] == MessageType.GET:
-                key = json_request['key']
-                # Receive the response from the appropriate node using the ZeroMQ socket for that node.
-                # Send the response to the client.
-
-                value = self.get(key)
-                self.router_socket.send_multipart([identity, value])
-
-            elif json_request['type'] == 'put':
-                shopping_list = json_request['shopping_list']
-                # Receive the response from the appropriate node using the ZeroMQ socket for that node.
-                # Send the response to the client.
-
-                self.put(shopping_list)
-                # list_id = shopping_list['id']
-
-                # value = self.get(key)
-                # self.router_socket.send_multipart([identity, value])
-
-            # self.router_socket.send(response)
 
     def read_data_quorum(self, key):
         primary_node = self.hash_ring.get_node(key)
@@ -330,9 +300,9 @@ class Router:
 
         result = self.send_get_request_to_nodes(request, [primary_node] + replicas, 10, 3, R_QUORUM)
 
-        if len(result) < R_QUORUM:
-            print(result)
-            return None
+        # if len(result) < R_QUORUM:
+        #     print(result)
+        #     return None
         # todo validate if all results are the same
         return result
 
@@ -346,8 +316,9 @@ class Router:
 
         result = self.send_put_request_to_nodes(request, [primary_node] + replicas, 5, 1, W_QUORUM)
 
-        if len(result) < W_QUORUM:
-            return None
+        print(result)
+        # if len(result) < W_QUORUM:
+        #     return None
         # todo validate if all results are the same
         return result
 
@@ -393,38 +364,12 @@ class Router:
         return self.hash_ring.get_node(list_id)
 
     def get(self, key):
-        # Create a request message.
-
-        request = {
-            "key": key
-        }
-
-        # request = json.dumps(data).encode()
-
-        # Send the request to the appropriate node.
-
-        node = self.route(key)
-        # socket.recv_multipart()
-
-        # socket.send_json(request)
-        self.router_socket.send_multipart([node.encode('utf-8'), json.dumps(request).encode('utf-8')])
-
-        # Receive the response from the appropriate node.
-        # response = socket.recv()
-        client_id, response = self.router_socket.recv_multipart()
-        print(client_id)
-
-        # time.sleep(1)
+        response = self.read_data_quorum(key)
         return response
 
-    def put(self, shopping_list: dict):
-        list_id = shopping_list['id']
-        #         this id is a uuid, use consisten hashing to find the node
-        node = self.route(list_id)
-
-        # TODO how to store each list???
-
-
+    def put(self, shopping_list: ShoppingList):
+        key = shopping_list.id
+        return self.write_data_quorum(key, shopping_list.to_json_string())
 
 
 def hash_ring_testing(hash_table):
@@ -467,10 +412,8 @@ def main():
     # change to latin-1
     sys.stdin = open(sys.stdin.fileno(), mode='r', encoding='latin-1', buffering=True)
 
-
     if input('Test the hash ring? (y/n) ').lower() == 'y':
         hash_ring_testing(hash_table)
-
 
     if input('Test quorums? (y/n) ').lower() == 'y':
         key_to_lookup = "key2"

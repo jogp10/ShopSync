@@ -1,3 +1,4 @@
+import json
 from uuid import uuid4, UUID
 
 import requests
@@ -52,7 +53,16 @@ class ShoppingList:
             "items": self.items
         }
 
+    def to_json_string(self):
+        return json.dumps(self, indent=2, default=lambda x: x.__dict__)
+
+
     @staticmethod
     def from_dict(d: dict):
         parsed_items = ShoppingListCRDT.from_dict(d['items'])
         return ShoppingList(d['id'], d['name'], parsed_items)
+
+    def print_items(self):
+        print(f"Items in {self.name}:")
+        for item in self.items.counters:
+            print(f"{item}: {self.items.value(item)}")

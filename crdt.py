@@ -190,6 +190,14 @@ def upsert(k, v, fn, my_map):
         my_map[k] = fn(my_map[k])
     return my_map
 
+# create a function like upsert that either creates a list with the element or appends to the list
+def upsert_list(k, v, my_map):
+    if k not in my_map or not isinstance(my_map[k], list):
+        my_map[k] = [v]
+    else:
+        my_map[k].append(v)
+    return my_map
+
 
 VTime = Dict[ReplicaId, int]
 MClock = Dict[ReplicaId, VTime]

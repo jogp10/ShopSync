@@ -1,0 +1,36 @@
+{
+  "id": "ee5cd2c4-6a95-4128-b402-4718fdaa4a96",
+  "name": "qq",
+  "items": {
+    "counters": {
+      "aa": {
+        "inc_counter": {
+          "counter_map": {
+            "tcp://localhost:6001": 22
+          },
+          "replica_clock": {
+            "tcp://localhost:6001": 1
+          }
+        },
+        "dec_counter": {
+          "counter_map": {},
+          "replica_clock": {}
+        }
+      },
+      "bb": {
+        "inc_counter": {
+          "counter_map": {
+            "tcp://localhost:6001": 11
+          },
+          "replica_clock": {
+            "tcp://localhost:6001": 2
+          }
+        },
+        "dec_counter": {
+          "counter_map": {},
+          "replica_clock": {}
+        }
+      }
+    }
+  }
+}
