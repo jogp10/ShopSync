@@ -180,6 +180,9 @@ class ShoppingListCRDT:
         counters = {k: PNCounter(GCounter.from_dict(v['inc_counter']), GCounter.from_dict(v['dec_counter'])) for k, v in counters['counters'].items()}
         return ShoppingListCRDT(counters)
 
+    def to_json_string(self):
+        return json.dumps(self, indent=2, default=lambda x: x.__dict__)
+
 
 # """Things that are not actually used but may serve as inspiration for any tweaks"""
 

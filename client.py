@@ -10,6 +10,7 @@ import sqlite3
 import zmq
 
 from shopping_list import ShoppingList
+from crdt import ShoppingListCRDT
 from utils import ROUTER_ADDRESS, MessageType
 
 
@@ -91,10 +92,11 @@ class Client:
         # Convert the JSON strings back to Python dictionaries
     
         for row in data:
+            items_dict = json.loads(row[2])
             shopping_list = {
                 "id": row[0],
                 "name": row[1],
-                "items": row[2]
+                "items": items_dict
             }
             self.shopping_lists.append(ShoppingList.from_dict(shopping_list))
     
@@ -103,37 +105,18 @@ class Client:
         conn = sqlite3.connect(os.path.join("db", transformed_username, "client.db"))
         cursor = conn.cursor()
 
+        # Delete all rows from the shopping_list table
+        cursor.execute("DELETE FROM shopping_list")
+
         for shopping_list in self.shopping_lists:
             shopping_list_dict = shopping_list.to_dict()
-            #items_json = json.dumps(shopping_list_dict["items"])
-            print(shopping_list_dict["items"])
+            items_json = shopping_list_dict["items"].to_json_string()
+    
             cursor.execute("INSERT INTO shopping_list (id, name, items) VALUES (?, ?, ?)",
-                   (shopping_list_dict["id"], shopping_list_dict["name"], shopping_list_dict["items"]))
+                   (shopping_list_dict["id"], shopping_list_dict["name"], items_json))
         
-        conn.commmit()
+        conn.commit()
         conn.close()
-
-    '''
-    def load_local_shopping_lists(self):
-        transformed_username = self.username.replace(' ', '_').replace(":", "_").replace("/", "-")
-        if not os.path.exists('lists/' + transformed_username):
-            os.makedirs('lists/' + transformed_username)
-        for filename in os.listdir('lists/' + transformed_username):
-            if filename.endswith('.json'):
-                with open(f'lists/{transformed_username}/{filename}', 'r') as f:
-                    shopping_list = json.load(f)
-                self.shopping_lists.append(ShoppingList.from_dict(shopping_list))
-                print(f'Loaded shopping list {shopping_list["name"]} from local storage.')
-                print(self.shopping_lists[-1], '\n\n')
-
-    def store_shopping_lists_locally(self):
-        transformed_username = self.username.replace(' ', '_').replace(":", "_").replace("/", "-")
-        if not os.path.exists('lists/' + transformed_username):
-            os.makedirs('lists/' + transformed_username)
-        for shopping_list in self.shopping_lists:
-            with open(f'lists/{transformed_username}/{shopping_list.id}.json', 'w') as f:
-                json.dump(shopping_list, indent=2, default=lambda x: x.__dict__, fp=f)
-    '''
 
     def store_shopping_list_online(self, shopping_list: ShoppingList):
         request = {
