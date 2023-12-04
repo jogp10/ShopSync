@@ -4,6 +4,8 @@ import json
 import os
 import sys
 from uuid import uuid4
+import json
+import sqlite3
 
 import zmq
 
@@ -45,6 +47,73 @@ class Client:
         self.shopping_lists.append(shopping_list)
         return shopping_list
 
+
+    #Functions for database handling
+    def create_database_and_table(self):
+        transformed_username = self.username.replace(' ', '_').replace(":", "_").replace("/", "-")
+        db_folder = f"db/{transformed_username}/"
+
+        if not os.path.exists(db_folder):
+            os.makedirs(db_folder)
+        
+        conn = sqlite3.connect(os.path.join(db_folder, "client.db"))
+        cursor = conn.cursor()
+
+        # Create the shopping_list table if it doesn't exist
+        cursor.execute('''
+            CREATE TABLE IF NOT EXISTS shopping_list (
+                id TEXT PRIMARY KEY,
+                name TEXT,
+                items TEXT
+            )
+        ''')
+
+
+        conn.commit()
+        conn.close()
+
+    def get_database_data(self):
+        transformed_username = self.username.replace(' ', '_').replace(":", "_").replace("/", "-")
+        db_folder = f"db/{transformed_username}/"
+
+        if not os.path.exists(db_folder):
+            self.create_database_and_table()
+            return
+
+        conn = sqlite3.connect(os.path.join(db_folder, "client.db"))
+        cursor = conn.cursor()
+
+        cursor.execute("SELECT * FROM shopping_list")
+        data = cursor.fetchall()
+
+        conn.close()
+
+        # Convert the JSON strings back to Python dictionaries
+    
+        for row in data:
+            shopping_list = {
+                "id": row[0],
+                "name": row[1],
+                "items": row[2]
+            }
+            self.shopping_lists.append(ShoppingList.from_dict(shopping_list))
+    
+    def save_database_data(self):
+        transformed_username = transformed_username = self.username.replace(' ', '_').replace(":", "_").replace("/", "-")
+        conn = sqlite3.connect(os.path.join("db", transformed_username, "client.db"))
+        cursor = conn.cursor()
+
+        for shopping_list in self.shopping_lists:
+            shopping_list_dict = shopping_list.to_dict()
+            #items_json = json.dumps(shopping_list_dict["items"])
+            print(shopping_list_dict["items"])
+            cursor.execute("INSERT INTO shopping_list (id, name, items) VALUES (?, ?, ?)",
+                   (shopping_list_dict["id"], shopping_list_dict["name"], shopping_list_dict["items"]))
+        
+        conn.commmit()
+        conn.close()
+
+    '''
     def load_local_shopping_lists(self):
         transformed_username = self.username.replace(' ', '_').replace(":", "_").replace("/", "-")
         if not os.path.exists('lists/' + transformed_username):
@@ -64,6 +133,7 @@ class Client:
         for shopping_list in self.shopping_lists:
             with open(f'lists/{transformed_username}/{shopping_list.id}.json', 'w') as f:
                 json.dump(shopping_list, indent=2, default=lambda x: x.__dict__, fp=f)
+    '''
 
     def store_shopping_list_online(self, shopping_list: ShoppingList):
         request = {
@@ -94,6 +164,9 @@ class Client:
         self.socket.send_json(request, zmq.NOBLOCK)
         response = self.socket.recv_json()
         print(response)
+
+
+
 
 def ask_for_items():
     items = []
@@ -131,14 +204,16 @@ if __name__ == "__main__":
     if len(sys.argv) != 2:
         print("Usage: python client.py <port>")
         sys.exit(1)
+    
 
     port = sys.argv[1]  # the identity can be anything, the port is not being used by the dealer socket
     client_address = f"tcp://localhost:{port}"
 
     server_address = ROUTER_ADDRESS
-    # username = "client 1"
     client = Client(server_address, client_address)
-    client.load_local_shopping_lists()
+    
+    #client.load_local_shopping_lists()
+    client.get_database_data()
 
 
     while True:
@@ -259,4 +334,4 @@ if __name__ == "__main__":
         else:
             print("Invalid choice!")
 
-    client.store_shopping_lists_locally()
+    client.save_database_data()
