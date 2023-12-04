@@ -91,7 +91,7 @@ def ask_for_items():
     while True:
         name = input("Enter an item (or press Enter to finish): ").strip()
         if name:
-            quantity = int(input("Enter the quantity: "))
+            quantity = get_int_from_user("Enter the quantity: ")
             items.append((name, quantity))
         else:
             break
@@ -100,9 +100,23 @@ def ask_for_items():
 
 def show_available_lists(client: Client):
     print("Available Shopping Lists:")
+    if client.shopping_lists.__len__() == 0:
+        print("No shopping lists available!")
+        return
     for idx, shopping_list in enumerate(client.shopping_lists):
         print(f"{idx + 1}. {shopping_list.name} (ID: {shopping_list.id})")
+    return (1, client.shopping_lists.__len__())
 
+def get_int_from_user(prompt: str, min: int = -9999, max: int = 9999):
+    while True:
+        try:
+            value = int(input(prompt))
+            if value < min or value > max:
+                print(f"Please enter a number between {min} and {max}")
+                continue
+            return value
+        except ValueError:
+            print("Please enter a number")
 
 if __name__ == "__main__":
     if len(sys.argv) != 2:
@@ -139,12 +153,16 @@ if __name__ == "__main__":
             print(f'Shopping list created: {shopping_list.name}')
 
         elif choice == '2':
-            show_available_lists(client)
+            (min, max) = show_available_lists(client)
 
-            list_index = int(input("Enter the number of the shopping list to which you want to add an item: ")) - 1
+            list_index = get_int_from_user("Enter the number of the shopping list to which you want to add an item: ", min, max) - 1
+        
             shopping_list: ShoppingList = client.shopping_lists[list_index]
+                    
             item = input("Enter the item to add: ")
-            quantity = int(input("Enter the quantity: "))
+
+            quantity = get_int_from_user("Enter the quantity: ")
+
             shopping_list.add_item((item, quantity), client.username)
             print(f'Shopping list updated')
 
@@ -152,20 +170,23 @@ if __name__ == "__main__":
             show_available_lists(client)
 
         elif choice == '4':
-            show_available_lists(client)
+            (min, max) = show_available_lists(client)
 
-            list_index = int(input("Enter the number of the shopping list to which you want to alter an item: ")) - 1
+
+            list_index = get_int_from_user("Enter the number of the shopping list to which you want to change an item: ", min, max) - 1
+
             shopping_list: ShoppingList = client.shopping_lists[list_index]
             shopping_list.print_items()
 
             item = input("Enter the item to change: ")
-            quantity = int(input("Enter the increase or decrease value: "))
+            
+            quantity = get_int_from_user("Enter the increase or decrease value: ")
             shopping_list.change_item_quantity((item, quantity), client.username)
 
         elif choice == '5':
-            show_available_lists(client)
+            (min, max) = show_available_lists(client)
 
-            list_index = int(input("Enter the number of the shopping list to sync to the cloud: ")) - 1
+            list_index = get_int_from_user("Enter the number of the shopping list to sync to the cloud: ", min, max) - 1
             shopping_list: ShoppingList = client.shopping_lists[list_index]
             client.store_shopping_list_online(shopping_list)
 
