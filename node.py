@@ -38,25 +38,9 @@ class DynamoNode:
             for shopping_list_crdt in self.data[list_id]:
                 merged_data = merged_data.merge(shopping_list_crdt)
 
-            self.data[list_id] = merged_data  # assuming no need to maintain history??
+            self.data[list_id] = [merged_data]  # assuming no need to maintain history??
             return json.dumps(merged_data, indent=2, default=lambda x: x.__dict__)
 
-
-
-
-"""
-These 2 functions will probably never be called, since all increments should be done by a client and the servers only merge data
-
-    def increment_item(self, key, value):
-        if value >= 0:
-            self.data = self.data.inc(key, self.name, value)
-        else:
-            self.data = self.data.dec(key, self.name, -value)
-        return True  # False if errors?
-
-    def get_data(self, key):
-        return self.data.value(key)
-"""
 
 
 if __name__ == "__main__":
@@ -138,9 +122,3 @@ if __name__ == "__main__":
                 node_socket.send_json(response)
                 continue
 
-        # request = socket.recv( zmq.NOBLOCK
-        # Receive the response from the appropriate node using the ZeroMQ socket for that node.
-
-        # Send the response to the client.
-
-        node_socket.send(json.dumps({key: "bar"}).encode('utf-8'))
