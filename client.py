@@ -121,7 +121,8 @@ class Client:
     def store_shopping_list_online(self, shopping_list: ShoppingList):
         request = {
             "type": MessageType.PUT,
-            "shopping_list": json.dumps(shopping_list, default=lambda x: x.__dict__)
+            "key": shopping_list.id,
+            "value": json.dumps(shopping_list, default=lambda x: x.__dict__)
         }
         self.socket.send_json(request, zmq.NOBLOCK)
         response = self.socket.recv_json()
@@ -129,7 +130,7 @@ class Client:
 
     def fetch_shopping_list(self, list_id):
         request = {
-            "type": MessageType.GET,
+            "type": MessageType.GET, # :()
             "key": list_id
         }
 
@@ -304,7 +305,7 @@ if __name__ == "__main__":
         elif choice == '9':
             # Store all shopping lists to cloud
             for shopping_list in client.shopping_lists:
-                print("Stroring shopping list" + shopping_list.name + "to cloud...")
+                print("Stroring shopping list " + shopping_list.name + " to cloud...")
                 client.store_shopping_list_online(shopping_list)
 
             print("Goodbye!")
@@ -316,5 +317,8 @@ if __name__ == "__main__":
 
         else:
             print("Invalid choice!")
+
+        #Ask the user to press 'c' to continue to the main menu
+        input("Press any key to continue to the main menu: ")
 
     client.save_database_data()

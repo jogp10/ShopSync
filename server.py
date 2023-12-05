@@ -208,7 +208,7 @@ class Router:
                     continue
 
     def process_heavy_tasks(self, tasks_queue):
-        """For requests and replies between the router and server nodes"""
+        """For requests and replies between the client and server nodes"""
         while True:
             task = tasks_queue.get()
             if task is None:
@@ -216,9 +216,9 @@ class Router:
 
             match get_request_type(task):
                 case MessageType.PUT:
-                    shopping_list = task['shopping_list']
-                    shopping_list = ShoppingList.from_dict(json.loads(shopping_list))
-                    response = self.put(shopping_list)
+                    shopping_list = task['value']
+                    key = task['key']
+                    response = self.put(key, shopping_list)
                     self.router_socket.send_multipart(
                         [task['address'].encode('utf-8'), json.dumps(response).encode('utf-8')])
 
@@ -367,9 +367,8 @@ class Router:
         response = self.read_data_quorum(key)
         return response
 
-    def put(self, shopping_list: ShoppingList):
-        key = shopping_list.id
-        return self.write_data_quorum(key, shopping_list.to_json_string())
+    def put(self, key, value):
+        return self.write_data_quorum(key, value)
 
 
 def hash_ring_testing(hash_table):

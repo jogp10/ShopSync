@@ -1,8 +1,12 @@
 import json
 import sys
 from typing import Dict
+import os
+import sqlite3
+import time
 
 import zmq
+
 
 from crdt import ShoppingListCRDT, upsert, upsert_list
 from shopping_list import ShoppingList
@@ -11,35 +15,119 @@ from utils import MessageType, get_request_type, build_register_request, ROUTER_
 
 class DynamoNode:
     def __init__(self, name, data: dict = {}):
-        #potentially receive previous data stored in memory
         self.name = name
-        self.data: dict = data  # a dict k: list id, v: ShoppingListCRDT[]
+        self.data: dict = data  # a dict k: list id, v: ShoppingList[]
+        self.dirty: dict = {} # a dict k: list id, v: True if dirty, False otherwise
 
-        # TODO remove, debug, etc...
+        for key in data.keys():
+            self.dirty[key] = False
 
-        mock_list = ShoppingListCRDT.zero()
-        mock_list = mock_list.inc("banana", "a", 1)
-        mock_list = mock_list.inc("apple", "a", 2)
-        mock_list = mock_list.inc("orange", "a", 3)
-        self.data['lista1'] = [mock_list]
-
-
-    def write_data(self, list_id, data):
-        shopping_list = ShoppingList.from_dict(json.loads(data))
-        upsert_list(list_id, shopping_list.items, self.data)
+    def write_data(self, list_id, shopping_list: ShoppingList):
+        self.dirty[list_id] = True
+        upsert_list(list_id, shopping_list, self.data)
         return True # False if errors?
 
     def read_data(self, list_id):
-        if self.data[list_id] is None:
+        if self.data.get(list_id) is None:
             return None
         else:
-            # merge all the data in the list
-            merged_data = ShoppingListCRDT.zero()
-            for shopping_list_crdt in self.data[list_id]:
-                merged_data = merged_data.merge(shopping_list_crdt)
+            list_name = self.data[list_id][0].name
+            merged_crdt = ShoppingListCRDT.zero()
+            for shopping_list in self.data[list_id]:
+                merged_crdt = merged_crdt.merge(shopping_list.items)
 
-            self.data[list_id] = [merged_data]  # assuming no need to maintain history??
+            merged_data = ShoppingList(list_id, list_name, merged_crdt)
+            self.data[list_id] = [merged_data]  # assuming no need to maintain history
+
             return json.dumps(merged_data, indent=2, default=lambda x: x.__dict__)
+        
+    def create_database_and_table(self):
+        transformed_name = self.name.replace(' ', '_').replace(":", "_").replace("/", "-")
+        db_folder = f"db_server/{transformed_name}/"
+
+        if not os.path.exists(db_folder):
+            os.makedirs(db_folder)
+        
+        conn = sqlite3.connect(os.path.join(db_folder, "node.db"))
+        cursor = conn.cursor()
+
+        # Create the shopping_list table if it doesn't exist
+        cursor.execute('''
+            CREATE TABLE IF NOT EXISTS shopping_list (
+                id TEXT PRIMARY KEY,
+                name TEXT,
+                items TEXT
+            )
+        ''')
+
+
+        conn.commit()
+        conn.close()
+
+    def get_database_data(self):
+        transformed_name = self.name.replace(' ', '_').replace(":", "_").replace("/", "-")
+        db_folder = f"db_server/{transformed_name}/"
+
+        if not os.path.exists(db_folder):
+            self.create_database_and_table()
+            return
+
+        conn = sqlite3.connect(os.path.join(db_folder, "node.db"))
+        cursor = conn.cursor()
+
+        cursor.execute("SELECT * FROM shopping_list")
+        data = cursor.fetchall()
+
+        conn.close()
+
+        # Convert the JSON strings back to Python dictionaries
+    
+        for row in data:
+            items_dict = json.loads(row[2])
+            shopping_list = {
+                "id": row[0],
+                "name": row[1],
+                "items": items_dict
+            }
+            self.write_data(shopping_list["id"], ShoppingList.from_dict(shopping_list))
+
+    def save_all_database_data(self):
+        transformed_name = self.name.replace(' ', '_').replace(":", "_").replace("/", "-")
+        db_folder = f"db_server/{transformed_name}/"
+        conn = sqlite3.connect(os.path.join(db_folder, "node.db"))
+        cursor = conn.cursor()
+
+        # Delete all rows from the shopping_list table
+        cursor.execute("DELETE FROM shopping_list")
+
+        for shopping_list in self.data.values():
+            shopping_list_dict = shopping_list.to_dict()
+            items_json = shopping_list_dict["items"].to_json_string()
+    
+            cursor.execute("INSERT INTO shopping_list (id, name, items) VALUES (?, ?, ?)",
+                   (shopping_list_dict["id"], shopping_list_dict["name"], items_json))
+        
+        conn.commit()
+        conn.close()
+
+    def save_shopping_list_database(self, list_id):
+        transformed_name = self.name.replace(' ', '_').replace(":", "_").replace("/", "-")
+        db_folder = f"db_server/{transformed_name}/"
+        conn = sqlite3.connect(os.path.join(db_folder, "node.db"))
+        cursor = conn.cursor()
+
+        shopping_list = self.data[list_id][0]
+        shopping_list_dict = shopping_list.to_dict()
+        items_json = shopping_list_dict["items"].to_json_string()
+
+        cursor.execute("INSERT or REPLACE INTO shopping_list (id, name, items) VALUES (?, ?, ?)",
+                   (shopping_list_dict["id"], shopping_list_dict["name"], items_json))
+        
+        self.dirty[list_id] = False
+
+        conn.commit()
+        conn.close()
+
 
 
 
@@ -70,6 +158,8 @@ if __name__ == "__main__":
     # Create a DynamoNode instance for this node
     dynamo_node = DynamoNode(node_address)
 
+    dynamo_node.get_database_data()
+
     # Start listening for messages
     while True:
         # TODO usar polling ou selector para verificar/escolher se tem mensagens?
@@ -94,15 +184,19 @@ if __name__ == "__main__":
                 }
                 # time.sleep(1)
                 node_socket.send_json(response)
+                #SAVE TO DATABASE, CAN BE MADE AFTER SENDING THE RESPONSE TO THE USER, ONLY MADE IF WRITES WERE MADE
+                if(dynamo_node.dirty.get(key)):
+                    dynamo_node.save_shopping_list_database(key)
                 continue
 
             case MessageType.PUT:
                 key = request['key']
                 value = request['value']
+
                 response = {
                     "type": MessageType.PUT_RESPONSE,
                     "key": key,
-                    "value": dynamo_node.write_data(key, value),
+                    "value": dynamo_node.write_data(key, ShoppingList.from_dict(json.loads(value))),
                     "address": node_socket.IDENTITY.decode('utf-8'),
                     "quorum_id": request['quorum_id']
                 }
@@ -121,4 +215,5 @@ if __name__ == "__main__":
                 }
                 node_socket.send_json(response)
                 continue
+
 
