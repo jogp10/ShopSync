@@ -1,11 +1,13 @@
 # Auxiliary functions for the main script
 # enum for request types
+import time
 import uuid
 from enum import Enum, IntEnum
 
 
 ROUTER_ADDRESS = "tcp://localhost:5554"
 ROUTER_BIND_ADDRESS = "tcp://*:5554"
+TIMEOUT_THRESHOLD = 500
 
 class MessageType(IntEnum):
     GET = 1
@@ -18,6 +20,12 @@ class MessageType(IntEnum):
     REGISTER_RESPONSE = 8
     HEARTBEAT = 9
     HEARTBEAT_RESPONSE = 10
+
+
+# class QuorumState:
+#     def __init__(self):
+#         self.retries = 0
+
 
 
 
@@ -47,13 +55,14 @@ def build_put_request(key, value):
     }
 
 
-def build_quorum_put_request(key, value, quorum_id):
+def build_quorum_put_request(key, value, quorum_id, replicas):
     """given a key and a value, return a json for a put request of that key and value"""
     return {
         "type": MessageType.PUT,
         "key": key,
         "value": value,
-        "quorum_id": quorum_id
+        "quorum_id": quorum_id,
+        "replicas": replicas
     }
 
 def build_delete_request(key):
@@ -126,3 +135,7 @@ def get_quorum_value(values, quorum_size):
 def get_most_common_value(values):
     """given a list of values, return the value that appears the most times"""
     return max(set(values), key=values.count)
+
+
+def valid_heartbeat(node_activity):
+    return time.time() - node_activity['last_time_active'] < TIMEOUT_THRESHOLD

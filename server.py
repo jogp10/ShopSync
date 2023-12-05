@@ -14,7 +14,6 @@ import threading
 import asyncio
 
 from crdt import ShoppingListCRDT
-from node import DynamoNode
 from shopping_list import ShoppingList
 from utils import *
 
@@ -22,7 +21,6 @@ N = 4
 R_QUORUM = 2
 W_QUORUM = 3
 MONITOR_INTERVAL = 3
-TIMEOUT_THRESHOLD = 500  # usually 5 seconds but while debugging it's easier to use a larger value else the nodes are considered down too quickly if the main server thrwad does not update heartbeats
 
 
 class HashRing:
@@ -127,6 +125,10 @@ class Router:
         self.write_quorum_requests_state = {}
         self.delete_quorum_requests_state = {}
 
+        #states of the quorums that have been forwarded to the nodes
+        self.forwarded_read_quorums = {} # a dictionary of quorum_id -> dictionary of node -> number of tries
+        self.forwarded_write_quorums = {} # a dictionary of quorum_id -> dictionary of node -> number of tries
+
         router_address = ROUTER_BIND_ADDRESS
         self.router_socket = self._context.socket(zmq.ROUTER)
         self.router_socket.bind(router_address)
@@ -158,10 +160,11 @@ class Router:
         self.activity.pop(node_address)
 
     def listen(self, socket: zmq.Socket):
+        pass
         # this function is stll here at the moment in case it easier to test multiple nodes as threads
         # dont delete just yet
-        identity = socket.IDENTITY.decode('utf-8')
-        socket_node = DynamoNode(identity)
+        # identity = socket.IDENTITY.decode('utf-8')
+        # socket_node = DynamoNode(identity)
 
     def process_tasks(self, tasks_queue, read_quorum_requests_state, write_quorum_requests_state, delete_quorum_requests_state):
         """For requests and replies between the router and server nodes"""
@@ -252,10 +255,8 @@ class Router:
     def monitor_nodes(self):
         # Periodically check for node heartbeats
         while True:
-            current_time = time.time()
             for node, info in list(self.activity.items()):
-                last_time_active = info['last_time_active']
-                if current_time - last_time_active > TIMEOUT_THRESHOLD:
+                if valid_heartbeat(info):
                     # Node is considered down
                     print(f"Node {node} is down.")
                     self.remove_node(node)
@@ -415,7 +416,38 @@ class Router:
         return response
 
     def put(self, key, value):
-        return self.write_data_quorum(key, value)
+        # elect healthy coordinator node
+        primary_node = self.hash_ring.get_node(key)
+        replicas = self.hash_ring.get_replica_nodes(primary_node)
+
+        # coordinator is the first that has a heartbeat
+        coordinator = None
+        for node in [primary_node] + replicas:
+            if node in self.activity and valid_heartbeat(self.activity[node]):
+                coordinator = node
+                break
+
+        if coordinator is None:
+            # todo scream
+            pass
+
+        # send the put request to the coordinator
+        quorum_id = str(uuid4())
+        self.forwarded_write_quorums[quorum_id] = {}
+        for node in [primary_node] + replicas:
+            self.forwarded_write_quorums[quorum_id][node] = 0
+
+        self.forwarded_write_quorums[quorum_id][coordinator] += 1
+
+        other_nodes = [node for node in [primary_node] + replicas if node != coordinator]
+
+        request = build_quorum_put_request(key, value, quorum_id, other_nodes)
+        self.router_socket.send_multipart([coordinator.encode('utf-8'), json.dumps(request).encode('utf-8')])
+
+
+
+
+        # return self.write_data_quorum(key, value)
     
     def delete(self, key):
         return self.delete_data_quorum(key)

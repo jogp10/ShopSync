@@ -20,6 +20,10 @@ class DynamoNode:
         self.data: dict = data  # a dict k: list id, v: ShoppingList[]
         self.dirty: dict = {} # a dict k: list id, v: True if dirty, False otherwise
 
+        self.read_quorum_requests_state = {}
+        self.write_quorum_requests_state = {}
+        self.delete_quorum_requests_state = {}
+
         for key in data.keys():
             self.dirty[key] = False
 
@@ -153,13 +157,19 @@ class DynamoNode:
         conn.close()
 
 
-def listen_for_nodes(reply_socket):
+def send_push_message(context, sender_address, receiver_address, message):
+    push_socket = context.socket(zmq.PUSH)
+    push_socket.connect(receiver_address)
+    push_socket.send_multipart([sender_address, message.encode('utf-8')])
+    push_socket.close()
+
+def listen_for_nodes(context, pull_socket):
     i = 0
-    node_address = reply_socket.IDENTITY
+    node_address = pull_socket.IDENTITY
     while True:
         if i > 5:
             break
-        identity, message = reply_socket.recv_multipart()
+        identity, message = pull_socket.recv_multipart()
         print(identity)
         print(message)
         print('\n\n')
@@ -171,7 +181,6 @@ def listen_for_nodes(reply_socket):
         # reply_socket.send_json({0: "OK"})
         push_socket = context.socket(zmq.PUSH)
         push_socket.connect(address)
-        # push_socket.send_multipart(build_register_request(node_address))
         push_socket.send_multipart([node_address, json.dumps(build_register_request("ok")).encode('utf-8')])
         push_socket.close()
         i += 1
@@ -207,7 +216,7 @@ if __name__ == "__main__":
     reply_socket.bind(f"tcp://*:{port}")
 
     # start a thread
-    reply_thread = threading.Thread(target=listen_for_nodes, args=(reply_socket,))
+    reply_thread = threading.Thread(target=listen_for_nodes, args=(context, reply_socket,))
     reply_thread.start()
 
     # if port != "6000" send message to 6000 to register
