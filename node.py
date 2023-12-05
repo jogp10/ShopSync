@@ -3,7 +3,7 @@ import sys
 from typing import Dict
 import os
 import sqlite3
-import time
+import atexit
 
 import zmq
 
@@ -103,6 +103,17 @@ class DynamoNode:
             }
             self.write_data(shopping_list["id"], ShoppingList.from_dict(shopping_list))
 
+    def merge_shopping_lists(self, shopping_lists):
+        list_id = shopping_lists[0].id
+        list_name = shopping_lists[0].name
+        merged_crdt = ShoppingListCRDT.zero()
+        for shopping_list in shopping_lists:
+            merged_crdt = merged_crdt.merge(shopping_list.items)
+
+        merged_data = ShoppingList(list_id, list_name, merged_crdt)
+        self.data[list_id] = [merged_data]
+        return merged_data
+
     def save_all_database_data(self):
         transformed_name = self.name.replace(' ', '_').replace(":", "_").replace("/", "-")
         db_folder = f"db_server/{transformed_name}/"
@@ -112,7 +123,9 @@ class DynamoNode:
         # Delete all rows from the shopping_list table
         cursor.execute("DELETE FROM shopping_list")
 
-        for shopping_list in self.data.values():
+        for shopping_lists in self.data.values():
+
+            shopping_list = self.merge_shopping_lists(shopping_lists)
             shopping_list_dict = shopping_list.to_dict()
             items_json = shopping_list_dict["items"].to_json_string()
     
@@ -180,6 +193,9 @@ if __name__ == "__main__":
     dynamo_node = DynamoNode(node_address)
 
     dynamo_node.get_database_data()
+
+    #ensure that at exit the database is saved
+    atexit.register(dynamo_node.save_all_database_data)
 
     # Start listening for messages
     while True:
