@@ -6,6 +6,7 @@ import sys
 from uuid import uuid4
 import json
 import sqlite3
+import atexit
 
 import zmq
 
@@ -136,9 +137,14 @@ class Client:
 
         self.socket.send_json(request, zmq.NOBLOCK)
         response = self.socket.recv_json()
+        
         print(response)
 
-         # TODO: USE THIS TO UPDATE THE LOCAL SHOPPING LIST
+        #TODO: UNCOMMENT AFTER QUORUM IS DONE
+
+        #shopping_list = ShoppingList.from_dict(json.loads(response))
+        #self.shopping_lists.append(shopping_list)
+        
 
     def delete_shopping_list(self, list_id):
         request = {
@@ -168,7 +174,7 @@ def show_available_lists(client: Client):
     print("Available Shopping Lists:")
     if client.shopping_lists.__len__() == 0:
         print("No shopping lists available!")
-        return
+        return (0, 0)
     for idx, shopping_list in enumerate(client.shopping_lists):
         print(f"{idx + 1}. {shopping_list.name} (ID: {shopping_list.id})")
     return (1, client.shopping_lists.__len__())
@@ -196,9 +202,10 @@ if __name__ == "__main__":
     server_address = ROUTER_ADDRESS
     client = Client(server_address, client_address)
     
-    #client.load_local_shopping_lists()
     client.get_database_data()
 
+    #ensure that at exit always do a local save
+    atexit.register(client.save_database_data)
 
     while True:
         print("1. Create Shopping List")
@@ -213,7 +220,7 @@ if __name__ == "__main__":
         print("7. Load Shopping List from Cloud")
         print("8. Delete Shopping List Permanently")
 
-        print("\n9. Quit and store shopping lists")
+        print("\n9. Quit and Sync Shopping Lists to Cloud")
         print("0. Quit")
         choice = input("Enter your choice: ").strip().lower()
 
@@ -225,6 +232,9 @@ if __name__ == "__main__":
 
         elif choice == '2':
             (min, max) = show_available_lists(client)
+
+            if (max == 0):
+                continue
 
             list_index = get_int_from_user("Enter the number of the shopping list to which you want to add an item: ", min, max) - 1
         
@@ -249,6 +259,8 @@ if __name__ == "__main__":
         elif choice == '4':
             (min, max) = show_available_lists(client)
 
+            if max == 0:
+                continue
 
             list_index = get_int_from_user("Enter the number of the shopping list to which you want to change an item: ", min, max) - 1
 
@@ -273,12 +285,18 @@ if __name__ == "__main__":
         elif choice == '5':
             (min, max) = show_available_lists(client)
 
+            if max == 0: 
+                continue
+
             list_index = get_int_from_user("Enter the number of the shopping list to print: ", min, max) - 1
             shopping_list: ShoppingList = client.shopping_lists[list_index]
             shopping_list.print_items()
 
         elif choice == '6':
             (min, max) = show_available_lists(client)
+            
+            if max == 0:
+                continue
 
             list_index = get_int_from_user("Enter the number of the shopping list to sync to the cloud: ", min, max) - 1
             shopping_list: ShoppingList = client.shopping_lists[list_index]
@@ -293,8 +311,13 @@ if __name__ == "__main__":
         elif choice == '8':
             (min, max) = show_available_lists(client)
 
+            if max == 0:
+                continue
+
             list_index = get_int_from_user("Enter the number of the shopping list to delete permanently: ", min, max) - 1
             shopping_list: ShoppingList = client.shopping_lists[list_index]
+
+            #delete locally, this will alter the database in the exit
             client.shopping_lists.remove(shopping_list)
 
             # TODO: delete from cloud, CHECK IF WORKS
@@ -319,6 +342,4 @@ if __name__ == "__main__":
             print("Invalid choice!")
 
         #Ask the user to press 'c' to continue to the main menu
-        input("Press any key to continue to the main menu: ")
-
-    client.save_database_data()
+        input("(---Press any key to continue to the main menu---)")

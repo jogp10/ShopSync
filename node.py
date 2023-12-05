@@ -22,6 +22,10 @@ class DynamoNode:
         for key in data.keys():
             self.dirty[key] = False
 
+    def remove_list_from_node(self, list_id):
+        self.data.pop(list_id, None)
+        self.dirty.pop(list_id, None)
+
     def write_data(self, list_id, shopping_list: ShoppingList):
         self.dirty[list_id] = True
         upsert_list(list_id, shopping_list, self.data)
@@ -40,6 +44,14 @@ class DynamoNode:
             self.data[list_id] = [merged_data]  # assuming no need to maintain history
 
             return json.dumps(merged_data, indent=2, default=lambda x: x.__dict__)
+        
+    def delete_data(self, list_id):
+        if self.data.get(list_id) is None:
+            return None
+        else:
+            self.remove_list_from_node(list_id)
+            self.delete_shopping_list_database(list_id)
+            return True
         
     def create_database_and_table(self):
         transformed_name = self.name.replace(' ', '_').replace(":", "_").replace("/", "-")
@@ -128,7 +140,16 @@ class DynamoNode:
         conn.commit()
         conn.close()
 
+    def delete_shopping_list_database(self, list_id):
+        transformed_name = self.name.replace(' ', '_').replace(":", "_").replace("/", "-")
+        db_folder = f"db_server/{transformed_name}/"
+        conn = sqlite3.connect(os.path.join(db_folder, "node.db"))
+        cursor = conn.cursor()
 
+        cursor.execute("DELETE FROM shopping_list WHERE id = ?", (list_id,))
+
+        conn.commit()
+        conn.close()
 
 
 if __name__ == "__main__":
@@ -184,7 +205,8 @@ if __name__ == "__main__":
                 }
                 # time.sleep(1)
                 node_socket.send_json(response)
-                #SAVE TO DATABASE, CAN BE MADE AFTER SENDING THE RESPONSE TO THE USER, ONLY MADE IF WRITES WERE MADE
+
+                #SAVE TO DATABASE, CAN BE MADE AFTER SENDING THE RESPONSE TO THE USER, ONLY MADE IF INFORMATION DIFFERENT FROM DATABASE (DIRTY IS TRUE)
                 if(dynamo_node.dirty.get(key)):
                     dynamo_node.save_shopping_list_database(key)
                 continue
@@ -203,6 +225,19 @@ if __name__ == "__main__":
                 # time.sleep(1)
                 node_socket.send_json(response)
                 continue
+
+            case MessageType.DELETE:
+                key = request['key']
+                response = {
+                    "type": MessageType.DELETE_RESPONSE,
+                    "key": key,
+                    "value": dynamo_node.delete_data(key),
+                    "address": node_socket.IDENTITY.decode('utf-8'),
+                    "quorum_id": request['quorum_id']
+                }
+                # time.sleep(1)
+                node_socket.send_json(response)
+
 
             case MessageType.REGISTER_RESPONSE:
                 # print(request)

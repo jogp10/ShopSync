@@ -125,6 +125,7 @@ class Router:
         self.heavy_tasks_queue = queue.Queue()  # todo ter os nós a coordenar os quorums evita esta queue
         self.read_quorum_requests_state = {}
         self.write_quorum_requests_state = {}
+        self.delete_quorum_requests_state = {}
 
         router_address = ROUTER_BIND_ADDRESS
         self.router_socket = self._context.socket(zmq.ROUTER)
@@ -162,7 +163,7 @@ class Router:
         identity = socket.IDENTITY.decode('utf-8')
         socket_node = DynamoNode(identity)
 
-    def process_tasks(self, tasks_queue, read_quorum_requests_state, write_quorum_requests_state):
+    def process_tasks(self, tasks_queue, read_quorum_requests_state, write_quorum_requests_state, delete_quorum_requests_state):
         """For requests and replies between the router and server nodes"""
         while True:
             task = tasks_queue.get()
@@ -198,6 +199,20 @@ class Router:
                         print("PUT::Received a response for a request that was already processed")
                         print(task)
                         continue
+                
+                case MessageType.DELETE_RESPONSE:
+                    request_id = task['quorum_id']
+                    if request_id in delete_quorum_requests_state:
+                        # print("PUT::Received a new response")
+                        # if the request is in the read quorum requests state, add the response to the responses list
+                        if task['address'] not in delete_quorum_requests_state[request_id]['nodes_with_reply']:
+                            delete_quorum_requests_state[request_id]['nodes_with_reply'].add(task['address'])
+                            delete_quorum_requests_state[request_id]['responses'].append(task['value'])
+                            delete_quorum_requests_state[request_id]['retry_info'][task['address']] += 1
+                    else:
+                        print("DELETE::Received a response for a request that was already processed")
+                        print(task)
+                        continue
 
                 case MessageType.REGISTER:
                     print("REGISTER::Received a new node", task['address'])
@@ -227,6 +242,12 @@ class Router:
                     response = self.get(key)
                     self.router_socket.send_multipart(
                         [task['address'].encode('utf-8'), json.dumps(response).encode('utf-8')])
+                    
+                case MessageType.DELETE:
+                    key = task['key']
+                    response = self.delete(key)
+                    self.router_socket.send_multipart(
+                        [task['address'].encode('utf-8'), json.dumps(response).encode('utf-8')])
 
     def monitor_nodes(self):
         # Periodically check for node heartbeats
@@ -254,7 +275,7 @@ class Router:
         # Start a thread to listen for requests on the client socket.
         tasks_thread = threading.Thread(target=self.process_tasks,
                                         args=(self.tasks_queue, self.read_quorum_requests_state,
-                                              self.write_quorum_requests_state))
+                                              self.write_quorum_requests_state, self.delete_quorum_requests_state))
         tasks_thread.start()
 
         heavy_tasks_thread = threading.Thread(target=self.process_heavy_tasks,
@@ -274,16 +295,16 @@ class Router:
             json_request = json.loads(message)
             print(json_request)
             if (json_request['type'] == MessageType.GET_RESPONSE or json_request['type'] == MessageType.PUT_RESPONSE
-                    or json_request['type'] == MessageType.REGISTER or json_request[
-                        'type'] == MessageType.HEARTBEAT_RESPONSE
+                    or json_request['type'] == MessageType.REGISTER or json_request['type'] == MessageType.HEARTBEAT_RESPONSE
                     or json_request['type'] == MessageType.PUT  # put sent by a client
-                    or json_request['type'] == MessageType.GET):
+                    or json_request['type'] == MessageType.GET
+                    or json_request['type'] == MessageType.DELETE):
 
 
                 if json_request['type'] != MessageType.REGISTER:
                     self.activity[identity.decode('utf-8')] = {}
                     self.activity[identity.decode('utf-8')]['last_time_active'] = time.time()
-                if json_request['type'] == MessageType.PUT or json_request['type'] == MessageType.GET:
+                if json_request['type'] == MessageType.PUT or json_request['type'] == MessageType.GET or json_request['type'] == MessageType.DELETE:
                     print("PUT/GET::Received a new request")
                     json_request['address'] = identity.decode('utf-8')
                     self.heavy_tasks_queue.put(json_request)
@@ -321,6 +342,23 @@ class Router:
         #     return None
         # todo validate if all results are the same
         return result
+    
+    def delete_data_quorum(self, key):
+        primary_node = self.hash_ring.get_node(key)
+        replicas = self.hash_ring.get_replica_nodes(primary_node)
+
+        # the responses will arrive asynchronously, so we need to wait for them
+        quorum_id = str(uuid4())
+        request = build_quorum_delete_request(key, quorum_id)
+
+        result = self.send_delete_request_to_nodes(request, [primary_node] + replicas, 5, 1, W_QUORUM)
+
+        print(result)
+        # if len(result) < W_QUORUM:
+        #     return None
+        # todo validate if all results are the same
+        return result
+
 
     def send_request_to_nodes(self, type, request, nodes, timeout, max_retries, quorum_size):
         quorum_id = request['quorum_id']
@@ -332,6 +370,10 @@ class Router:
             self.write_quorum_requests_state[quorum_id] = build_quorum_request_state(nodes, timeout, max_retries,
                                                                                      quorum_size)
             current_quorum_state = self.write_quorum_requests_state[quorum_id]
+        elif type == MessageType.DELETE:
+            self.delete_quorum_requests_state[quorum_id] = build_quorum_request_state(nodes, timeout, max_retries,
+                                                                                     quorum_size)
+            current_quorum_state = self.delete_quorum_requests_state[quorum_id]   
 
         start_time = time.time()
         # TODO should the condition be the length of the most common response?
@@ -352,6 +394,8 @@ class Router:
             del self.read_quorum_requests_state[quorum_id]
         elif type == MessageType.PUT:
             del self.write_quorum_requests_state[quorum_id]
+        elif type == MessageType.DELETE:
+            del self.delete_quorum_requests_state[quorum_id]
         return result
 
     def send_get_request_to_nodes(self, request, nodes, timeout, max_retries, quorum_size):
@@ -359,6 +403,9 @@ class Router:
 
     def send_put_request_to_nodes(self, request, nodes, timeout, max_retries, quorum_size):
         return self.send_request_to_nodes(MessageType.PUT, request, nodes, timeout, max_retries, quorum_size)
+    
+    def send_delete_request_to_nodes(self, request, nodes, timeout, max_retries, quorum_size):
+        return self.send_request_to_nodes(MessageType.DELETE, request, nodes, timeout, max_retries, quorum_size)
 
     def route(self, list_id: str):
         return self.hash_ring.get_node(list_id)
@@ -369,6 +416,10 @@ class Router:
 
     def put(self, key, value):
         return self.write_data_quorum(key, value)
+    
+    def delete(self, key):
+        return self.delete_data_quorum(key)
+
 
 
 def hash_ring_testing(hash_table):

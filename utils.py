@@ -13,10 +13,11 @@ class MessageType(IntEnum):
     DELETE = 3
     GET_RESPONSE = 4
     PUT_RESPONSE = 5
-    REGISTER = 6
-    REGISTER_RESPONSE = 7
-    HEARTBEAT = 8
-    HEARTBEAT_RESPONSE = 9
+    DELETE_RESPONSE = 6
+    REGISTER = 7
+    REGISTER_RESPONSE = 8
+    HEARTBEAT = 9
+    HEARTBEAT_RESPONSE = 10
 
 
 
@@ -52,6 +53,19 @@ def build_quorum_put_request(key, value, quorum_id):
         "type": MessageType.PUT,
         "key": key,
         "value": value,
+        "quorum_id": quorum_id
+    }
+
+def build_delete_request(key):
+    return {
+        "type": MessageType.DELETE,
+        "key": key
+    }
+
+def build_quorum_delete_request(key, quorum_id):
+    return {
+        "type": MessageType.DELETE,
+        "key": key,
         "quorum_id": quorum_id
     }
 
