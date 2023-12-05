@@ -10,7 +10,7 @@ MEDIUM:
 - meter quorums a verificar validez. é preciso haver concorância nos resultados. se não retorna-se ao cliente erro, volta-se a tentar??
 - para load balancing guardar histórico de nós requisitados?  e / ou ver um algoritmo de distribuição de carga. POUCO PRIORITÁRIO
 - compôr estrutura e nomenclatura. ou seja, os clientes chamam as funçóes de incremento de decremento do crdt
-depois apenas mandam o estado do seu crdt para ser escrito/mergido
+- delete shopping list
 - guardar estado dos nodes à semelhança dos pedidos de quorum no load balancer?
 
 

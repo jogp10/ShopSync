@@ -1,5 +1,6 @@
 import json
 import sys
+import threading
 from typing import Dict
 import os
 import sqlite3
@@ -152,6 +153,31 @@ class DynamoNode:
         conn.close()
 
 
+def listen_for_nodes(reply_socket):
+    i = 0
+    node_address = reply_socket.IDENTITY
+    while True:
+        if i > 5:
+            break
+        identity, message = reply_socket.recv_multipart()
+        print(identity)
+        print(message)
+        print('\n\n')
+        # print(message)
+        # print(f"Received reply from {address}: {message}")
+
+        address = identity.decode('utf-8')
+        print("Received reply from " + address)
+        # reply_socket.send_json({0: "OK"})
+        push_socket = context.socket(zmq.PUSH)
+        push_socket.connect(address)
+        # push_socket.send_multipart(build_register_request(node_address))
+        push_socket.send_multipart([node_address, json.dumps(build_register_request("ok")).encode('utf-8')])
+        push_socket.close()
+        i += 1
+
+
+
 if __name__ == "__main__":
     if len(sys.argv) != 2:
         print("Usage: python node.py <port>")
@@ -162,7 +188,7 @@ if __name__ == "__main__":
     port = sys.argv[1]
     node_address = f"tcp://localhost:{port}"
 
-    print(f"Node address: {node_address}")
+    # print(f"Node address: {node_address}")
 
     router_address = ROUTER_ADDRESS # todo change if more routers
 
@@ -175,6 +201,23 @@ if __name__ == "__main__":
 
     # send a first message to the router to register the node
     node_socket.send_json(build_register_request(node_address))
+
+    reply_socket = context.socket(zmq.PULL)
+    reply_socket.setsockopt(zmq.IDENTITY, node_address.encode('utf-8'))
+    reply_socket.bind(f"tcp://*:{port}")
+
+    # start a thread
+    reply_thread = threading.Thread(target=listen_for_nodes, args=(reply_socket,))
+    reply_thread.start()
+
+    # if port != "6000" send message to 6000 to register
+    if port != "6000":
+    #     create a push socket
+        push_socket = context.socket(zmq.PUSH)
+        push_socket.connect("tcp://localhost:6000")
+        push_socket.send_multipart([node_address.encode('utf-8'), json.dumps(build_register_request("ok")).encode('utf-8')])
+        push_socket.close()
+        print("Sent message to 6000")
 
     # Create a DynamoNode instance for this node
     dynamo_node = DynamoNode(node_address)
