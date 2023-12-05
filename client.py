@@ -142,8 +142,8 @@ class Client:
 
         #TODO: UNCOMMENT AFTER QUORUM IS DONE
 
-        #shopping_list = ShoppingList.from_dict(json.loads(response))
-        #self.shopping_lists.append(shopping_list)
+        #shopping_list_fetched = ShoppingList.from_dict(json.loads(response))
+        #
         
 
     def delete_shopping_list(self, list_id):
@@ -214,13 +214,12 @@ if __name__ == "__main__":
         print("4. Change Item Quantity")
         print("5. Print Shopping List")
         print("6. Sync Shopping List to Cloud")
-
-        # TODO opção que vá buscar uma lista ao servidor por id
-
         print("7. Load Shopping List from Cloud")
         print("8. Delete Shopping List Permanently")
+        print("9. Load My Shopping Lists from Cloud")
+        print("10. Sync My Shopping Lists to Cloud")
 
-        print("\n9. Quit and Sync Shopping Lists to Cloud")
+        print("\n11. Quit and Sync My Shopping Lists to Cloud")
         print("0. Quit")
         choice = input("Enter your choice: ").strip().lower()
 
@@ -306,8 +305,6 @@ if __name__ == "__main__":
             list_id = input("Enter the id of the shopping list to load from the cloud: ")
             client.fetch_shopping_list(list_id)
 
-            # uou can try 'lista1'
-
         elif choice == '8':
             (min, max) = show_available_lists(client)
 
@@ -326,6 +323,18 @@ if __name__ == "__main__":
             print(f'Shopping list deleted: {shopping_list.name}')
 
         elif choice == '9':
+            # Load all shopping lists from cloud
+            for shopping_list in client.shopping_lists:
+                print("Loading shopping list " + shopping_list.name + " from cloud...")
+                client.fetch_shopping_list(shopping_list.id)
+
+        elif choice == '10':
+            # Store all shopping lists to cloud
+            for shopping_list in client.shopping_lists:
+                print("Stroring shopping list " + shopping_list.name + " to cloud...")
+                client.store_shopping_list_online(shopping_list)
+                
+        elif choice == '11':
             # Store all shopping lists to cloud
             for shopping_list in client.shopping_lists:
                 print("Stroring shopping list " + shopping_list.name + " to cloud...")
