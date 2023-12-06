@@ -7,6 +7,9 @@ from enum import Enum, IntEnum
 
 ROUTER_ADDRESS = "tcp://localhost:5554"
 ROUTER_BIND_ADDRESS = "tcp://*:5554"
+ROUTER_BACKUP_ADDRESS = "tcp://localhost:5555"
+ROUTER_BACKUP_BIND_ADDRESS = "tcp://*:5555"
+NUM_ROUTERS = 2
 R_QUORUM = 2
 W_QUORUM = 3
 N = 4

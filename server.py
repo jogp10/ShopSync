@@ -442,12 +442,6 @@ def hash_ring_testing(hash_table):
 
 
 def main():
-    nodes = [
-        "tcp://localhost:5555",
-        "tcp://localhost:5556",
-        "tcp://localhost:5557",
-        "tcp://localhost:5558",
-    ]
     hash_table = Router(replica_count=24)
     hash_table.expose()
 
