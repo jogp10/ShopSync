@@ -224,6 +224,7 @@ class Node:
 
                 case MessageType.COORDINATE_DELETE:
                     self.coordinated_quorums_queue.put(request)
+                    continue
 
 
                 case MessageType.REGISTER_RESPONSE:
@@ -240,6 +241,7 @@ class Node:
 
     def send_push_message(self, sender_address, receiver_address, message):
         """sender_address comes already encoded"""
+        print(f"Sending push message from {sender_address} to {receiver_address}: {message}")
         push_socket = self.context.socket(zmq.PUSH)
         push_socket.connect(receiver_address)
         push_socket.send_multipart([sender_address, message.encode('utf-8')])
@@ -247,6 +249,8 @@ class Node:
 
     def send_request_to_other_nodes(self, request_type, request, nodes, timeout, max_retries, quorum_size):
         quorum_id = request['quorum_id']
+        quorum_size = min(quorum_size, len(set(nodes)))
+        print(f"Sending request to other nodes with quorum size {quorum_size}")
         if request_type == MessageType.GET:
             self.read_quorum_requests_state[quorum_id] = build_quorum_request_state(nodes, timeout, max_retries,
                                                                                     quorum_size)
@@ -270,18 +274,21 @@ class Node:
                     continue
                 if current_quorum_state['retry_info'][node] > max_retries:
                     continue
+                if time.time() - current_quorum_state['last_retry_time'][node] < MIN_TIME_BETWEEN_RETRIES:
+                    continue
                 current_quorum_state['retry_info'][node] += 1
+                current_quorum_state['last_retry_time'][node] = time.time()
 
                 self.send_push_message(self.node_socket.IDENTITY, node,
                                        json.dumps(request))
 
         result = current_quorum_state['responses'].copy()
-        # if request_type == MessageType.GET:
-        #     del self.read_quorum_requests_state[quorum_id]
-        if request_type == MessageType.PUT:
+        if request_type == MessageType.GET:
+            del self.read_quorum_requests_state[quorum_id]
+        elif request_type == MessageType.PUT:
             del self.write_quorum_requests_state[quorum_id]
-        # elif request_type == MessageType.DELETE:
-        #     del self.delete_quorum_requests_state[quorum_id]
+        elif request_type == MessageType.DELETE:
+            del self.delete_quorum_requests_state[quorum_id]
         return result
 
     def send_put_request_to_other_nodes(self, request, nodes, timeout, max_retries, quorum_size):
@@ -307,14 +314,18 @@ class Node:
                     value = task["value"]
                     request_to_replicas = build_put_request(key, value, quorum_id)
 
-                    result = ([self.dynamo_node.write_data(key, value)] +
+
+                    result = ([self.dynamo_node.write_data(key, ShoppingList.from_dict(json.loads(value)))] +
                               self.send_put_request_to_other_nodes(request_to_replicas, task['replicas'], 5, 1,
                                                                    W_QUORUM))
 
                     print(result)
-                    # if len(result) < W_QUORUM:
-                    #     return None
-                    # todo validate if all results are the same
+                    quorum_size = min(W_QUORUM, len(set(task['replicas'])) + 1)
+                    if len(result) < quorum_size:
+                        result = False
+                    else:
+                        result = True
+                    print("Result  after quorum consensus: ", result)
 
                     response_to_router = build_quorum_put_response(quorum_id, result)
                     self.node_socket.send_json(response_to_router)
@@ -329,9 +340,14 @@ class Node:
                                                                    R_QUORUM))
 
                     print(result)
-                    # if len(result) < W_QUORUM:
-                    #     return None
-                    # todo validate if all results are the same
+                    quorum_size = min(R_QUORUM, len(set(task['replicas'])) + 1)
+                    if len(result) < quorum_size:
+                        result = False
+                    else:
+                        shopping_lists = [ShoppingList.from_dict(json.loads(shopping_list)) for shopping_list in result]
+                        merged_shopping_list = self.dynamo_node.merge_shopping_lists(shopping_lists)
+                        result = json.dumps(merged_shopping_list, default=lambda x: x.__dict__)
+                    print("Result  after quorum consensus: ", result)
 
                     response_to_router = build_quorum_get_response(quorum_id, result)
                     self.node_socket.send_json(response_to_router)
@@ -341,14 +357,16 @@ class Node:
                     key = task["key"]
                     request_to_replicas = build_delete_request(key, quorum_id)
 
-                    result = ([self.dynamo_node.read_data(key)] +
+                    result = ([self.dynamo_node.delete_data(key)] +
                               self.send_delete_request_to_other_nodes(request_to_replicas, task['replicas'], 5, 1,
                                                                       R_QUORUM))
 
                     print(result)
-                    # if len(result) < W_QUORUM:
-                    #     return None
-                    # todo validate if all results are the same
+                    quorum_size = min(R_QUORUM, len(set(task['replicas'])) + 1)
+                    if len(result) < quorum_size:
+                        result = False
+                    else:
+                        result = True
 
                     response_to_router = build_quorum_delete_response(quorum_id, result)
                     self.node_socket.send_json(response_to_router)

@@ -11,6 +11,7 @@ W_QUORUM = 3
 N = 4
 TIMEOUT_THRESHOLD = 500
 MONITOR_INTERVAL = 30
+MIN_TIME_BETWEEN_RETRIES = 1
 
 
 class MessageType(StrEnum):
@@ -133,7 +134,8 @@ def build_quorum_request_state(nodes, timeout, max_retries, quorum_size):
         "responses": [],
         "timeout": timeout,
         "max_retries": max_retries,
-        "quorum_size": quorum_size
+        "quorum_size": quorum_size,
+        "last_retry_time": {node: 0 for node in nodes}
     }
 
 
@@ -162,6 +164,14 @@ def build_heartbeat_response():
     return {
         "type": MessageType.HEARTBEAT_RESPONSE,
     }
+
+# def build_quorum_failed_response(quorum_id):
+#     """return a json for a quorum failed response"""
+#     return {
+#         "type": MessageType.COORDINATE_PUT_RESPONSE,
+#         "result": False,
+#         "quorum_id": quorum_id
+#     }
 
 
 def get_quorum_value(values, quorum_size):

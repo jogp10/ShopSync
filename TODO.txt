@@ -2,7 +2,6 @@ NOTA: há mais todos pelo código que não estão aqui
 
 HIGH:
 - cada node deve ter o seu hashring e haver gossip entre eles para atualizar os hashrings?
-- meter quorums a verificar validez. é preciso haver concorância nos resultados. se não retorna-se ao cliente erro, volta-se a tentar??
 - gossip / hinted handoff
 - hinted handoff implica suspender nodes antes de os remover?
 - mais q 1 router???

@@ -100,6 +100,16 @@ class Client:
         conn.commit()
         conn.close()
 
+    def merge_shopping_lists(self, shopping_lists):
+        list_id = shopping_lists[0].id
+        list_name = shopping_lists[0].name
+        merged_crdt = ShoppingListCRDT.zero()
+        for shopping_list in shopping_lists:
+            merged_crdt = merged_crdt.merge(shopping_list.items)
+
+        merged_data = ShoppingList(list_id, list_name, merged_crdt)
+        return merged_data
+
     def store_shopping_list_online(self, shopping_list: ShoppingList):
         request = {
             "type": MessageType.PUT,
@@ -107,6 +117,7 @@ class Client:
             "value": json.dumps(shopping_list, default=lambda x: x.__dict__)
         }
         self.socket.send_json(request, zmq.NOBLOCK)
+        response = False
         start_time = time.time()
         while True:
             try:
@@ -118,7 +129,10 @@ class Client:
                     return
                 else:
                     continue
-        print(response)
+        if response:
+            print("Shopping list stored successfully")
+        else:
+            print("Shopping list storage failed")
 
     def fetch_shopping_list(self, list_id):
         request = {
@@ -128,6 +142,7 @@ class Client:
 
         self.socket.send_json(request, zmq.NOBLOCK)
         start_time = time.time()
+        response = False
         while True:
             try:
                 response = self.socket.recv_json(zmq.NOBLOCK)
@@ -139,12 +154,28 @@ class Client:
                     return
                 else:
                     continue
-        
-        print(response)
 
-        #TODO: UNCOMMENT AFTER QUORUM IS DONE
-        #shopping_list_fetched = ShoppingList.from_dict(json.loads(response))
-        #
+        if response:
+            print("Shopping list fetched successfully")
+            shopping_list_fetched = ShoppingList.from_dict(json.loads(response["result"]))
+            # get index of shopping list with the same id
+            shopping_list_ids = [shopping_list.id for shopping_list in self.shopping_lists]
+            try:
+                index = shopping_list_ids.index(shopping_list_fetched.id)
+            except ValueError:
+                index = -1
+            if index != -1:
+                # merge the shopping list
+                self.shopping_lists[index] = self.merge_shopping_lists([self.shopping_lists[index], shopping_list_fetched])
+                print(f"Shopping list {shopping_list_fetched.name} updated successfully!\n")
+            else:
+                # append the shopping list
+                self.shopping_lists.append(shopping_list_fetched)
+                print(f"Shopping list {shopping_list_fetched.name} added successfully!\n")
+
+        else:
+            print("Shopping list fetch failed")
+
 
     def delete_shopping_list(self, list_id):
         request = {
@@ -153,6 +184,7 @@ class Client:
         }
         self.socket.send_json(request, zmq.NOBLOCK)
         start_time = time.time()
+        response = False
         while True:
             try:
                 response = self.socket.recv_json(zmq.NOBLOCK)
@@ -163,8 +195,10 @@ class Client:
                     return
                 else:
                     continue
-        print(response)
-
+        if response:
+            print("Shopping list deleted successfully")
+        else:
+            print("Shopping list deletion failed")
 
 def ask_for_items():
     items = []
