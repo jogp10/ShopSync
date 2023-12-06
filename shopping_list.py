@@ -69,6 +69,9 @@ class ShoppingList:
         return ShoppingList(d['id'], d['name'], parsed_items)
 
     def print_items(self):
+        if(len(self.items.counters) == 0):
+            print(f"{self.name} is empty")
+            return
         print(f"Items in {self.name}:")
         for item in self.items.counters:
             print(f"{item}: {self.items.value(item)}")
