@@ -7,7 +7,11 @@ from enum import Enum, IntEnum
 
 ROUTER_ADDRESS = "tcp://localhost:5554"
 ROUTER_BIND_ADDRESS = "tcp://*:5554"
+R_QUORUM = 2
+W_QUORUM = 3
+N = 4
 TIMEOUT_THRESHOLD = 500
+MONITOR_INTERVAL = 3
 
 class MessageType(IntEnum):
     GET = 1
@@ -20,13 +24,10 @@ class MessageType(IntEnum):
     REGISTER_RESPONSE = 8
     HEARTBEAT = 9
     HEARTBEAT_RESPONSE = 10
-
-
-# class QuorumState:
-#     def __init__(self):
-#         self.retries = 0
-
-
+    COORDINATE_PUT = 11
+    COORDINATE_PUT_RESPONSE = 12
+    COORDINATE_GET = 13
+    COORDINATE_GET_RESPONSE = 14
 
 
 def build_get_request(key):
@@ -55,14 +56,22 @@ def build_put_request(key, value):
     }
 
 
-def build_quorum_put_request(key, value, quorum_id, replicas):
+def build_quorum_put_request(key, value, quorum_id, replicas=[]):
     """given a key and a value, return a json for a put request of that key and value"""
     return {
-        "type": MessageType.PUT,
+        "type": MessageType.COORDINATE_PUT,
         "key": key,
         "value": value,
         "quorum_id": quorum_id,
-        "replicas": replicas
+        "replicas": replicas  # todo remove once nodes have their own hashring
+    }
+
+def build_quorum_put_response(quorum_id, result):
+    """given the quorum id and the results, return a json for a put request response"""
+    return {
+        "type": MessageType.COORDINATE_PUT_RESPONSE,
+        "result": result,
+        "quorum_id": quorum_id
     }
 
 def build_delete_request(key):
