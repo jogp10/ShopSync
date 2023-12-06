@@ -7,7 +7,7 @@ from uuid import uuid4
 import json
 import sqlite3
 import atexit
-
+import time
 import zmq
 
 from shopping_list import ShoppingList
@@ -23,25 +23,7 @@ class Client:
         self.socket.connect(server_address)
         self.username = username
         self.shopping_lists = []
-
-    def get(self, key):
-        # Create a request message.
-
-        request = {
-            "key": key,
-            "type": "get"
-        }
-
-        # Send the request to the hash table.
-        self.socket.send_json(request, zmq.NOBLOCK)
-
-        # Receive the response from the hash table.
-        response = self.socket.recv_json()
-        value = response[key]
-
-        # Return the response.
-
-        return value
+        self.TIMEOUT = 7 #seconds
 
     def create_shopping_list(self, name: str, items: list[tuple[str, int]] = None):
         id = str(uuid4())
@@ -125,7 +107,17 @@ class Client:
             "value": json.dumps(shopping_list, default=lambda x: x.__dict__)
         }
         self.socket.send_json(request, zmq.NOBLOCK)
-        response = self.socket.recv_json()
+        start_time = time.time()
+        while True:
+            try:
+                response = self.socket.recv_json(zmq.NOBLOCK)
+                break
+            except zmq.error.Again:
+                if time.time() - start_time > self.TIMEOUT:
+                    print("Timeout")
+                    return
+                else:
+                    continue
         print(response)
 
     def fetch_shopping_list(self, list_id):
@@ -135,13 +127,23 @@ class Client:
         }
 
         self.socket.send_json(request, zmq.NOBLOCK)
-        response = self.socket.recv_json()
-
+        start_time = time.time()
+        while True:
+            try:
+                response = self.socket.recv_json(zmq.NOBLOCK)
+                break
+            except zmq.error.Again:
+                diff = time.time() - start_time
+                if diff > self.TIMEOUT:
+                    print("Timeout")
+                    return
+                else:
+                    continue
+        
         print(response)
 
-        # TODO: UNCOMMENT AFTER QUORUM IS DONE
-
-        # shopping_list_fetched = ShoppingList.from_dict(json.loads(response))
+        #TODO: UNCOMMENT AFTER QUORUM IS DONE
+        #shopping_list_fetched = ShoppingList.from_dict(json.loads(response))
         #
 
     def delete_shopping_list(self, list_id):
@@ -150,7 +152,17 @@ class Client:
             "key": list_id
         }
         self.socket.send_json(request, zmq.NOBLOCK)
-        response = self.socket.recv_json()
+        start_time = time.time()
+        while True:
+            try:
+                response = self.socket.recv_json(zmq.NOBLOCK)
+                break
+            except zmq.error.Again:
+                if time.time() - start_time > self.TIMEOUT:
+                    print("Timeout")
+                    return
+                else:
+                    continue
         print(response)
 
 
@@ -189,11 +201,14 @@ def get_int_from_user(prompt: str, min: int = -9999, max: int = 9999):
 
 
 if __name__ == "__main__":
+    '''
     if len(sys.argv) != 2:
         print("Usage: python client.py <port>")
         sys.exit(1)
 
     port = sys.argv[1]  # the identity can be anything, the port is not being used by the dealer socket
+    '''
+    port = 1000
     client_address = f"tcp://localhost:{port}"
 
     server_address = ROUTER_ADDRESS
@@ -201,7 +216,7 @@ if __name__ == "__main__":
 
     client.get_database_data()
 
-    # ensure that at exit always do a local save
+    #ensure that at exit always do a local save
     atexit.register(client.save_database_data)
 
     while True:
@@ -212,7 +227,7 @@ if __name__ == "__main__":
         print("5. Print Shopping List")
         print("6. Sync Shopping List to Cloud")
         print("7. Load Shopping List from Cloud")
-        print("8. Delete Shopping List Permanently")
+        print("8. Delete Shopping List from Local and Cloud (won't delete from other clients' local storage)")
         print("9. Load My Shopping Lists from Cloud")
         print("10. Sync My Shopping Lists to Cloud")
 
