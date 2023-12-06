@@ -49,7 +49,7 @@ class DynamoNode:
             merged_data = ShoppingList(list_id, list_name, merged_crdt)
             self.data[list_id] = [merged_data]  # assuming no need to maintain history
 
-            return json.dumps(merged_data, indent=2, default=lambda x: x.__dict__)
+            return json.dumps(merged_data, default=lambda x: x.__dict__)
 
     def delete_data(self, list_id):
         if self.data.get(list_id) is None:
@@ -120,6 +120,7 @@ class DynamoNode:
         return merged_data
 
     def save_all_database_data(self):
+        print("saving all database data")
         transformed_name = self.name.replace(' ', '_').replace(":", "_").replace("/", "-")
         db_folder = f"db_server/{transformed_name}/"
         conn = sqlite3.connect(os.path.join(db_folder, "node.db"))
@@ -186,6 +187,8 @@ class Node:
         self.reply_socket.bind(f"tcp://*:{port}")
 
         self.write_quorum_requests_state = {}
+        self.read_quorum_requests_state = {}
+        self.delete_quorum_requests_state = {}
         self.coordinated_quorums_queue = queue.Queue()
 
         # Create a DynamoNode instance for this node
@@ -199,27 +202,9 @@ class Node:
                                                       args=(self.coordinated_quorums_queue,))
         coordinated_quorums_thread.start()
 
-
         # Deal with messages from other nodes
         reply_thread = threading.Thread(target=self.listen_for_nodes)
         reply_thread.start()
-
-
-
-
-
-
-
-
-        # # if port != "6000" send message to 6000 to register
-        # if port != "6000":
-        #     #     create a push socket
-        #     push_socket = self.context.socket(zmq.PUSH)
-        #     push_socket.connect("tcp://localhost:6000")
-        #     push_socket.send_multipart(
-        #         [node_address.encode('utf-8'), json.dumps(build_register_request("ok")).encode('utf-8')])
-        #     push_socket.close()
-        #     print("Sent message to 6000")
 
         # Start listening for messages from the router
         while True:
@@ -229,53 +214,17 @@ class Node:
             # switch case on request type
             match get_request_type(request):
 
-                case MessageType.GET:
-                    key = request['key']
-                    response = {
-                        "type": MessageType.GET_RESPONSE,
-                        "key": key,
-                        "value": self.dynamo_node.read_data(key),
-                        "address": self.node_socket.IDENTITY.decode('utf-8'),
-                        "quorum_id": request['quorum_id']
-                    }
-                    # time.sleep(1)
-                    self.node_socket.send_json(response)
-
-                    # SAVE TO DATABASE, CAN BE MADE AFTER SENDING THE RESPONSE TO THE USER, ONLY MADE IF INFORMATION DIFFERENT FROM DATABASE (DIRTY IS TRUE)
-                    if (self.dynamo_node.dirty.get(key)):
-                        self.dynamo_node.save_shopping_list_database(key)
-                    continue
-
-                #should be a message received from another node
-                # case MessageType.PUT:
-                #     key = request['key']
-                #     value = request['value']
-                #
-                #     response = {
-                #         "type": MessageType.PUT_RESPONSE,
-                #         "key": key,
-                #         "value": self.dynamo_node.write_data(key, ShoppingList.from_dict(json.loads(value))),
-                #         "address": self.node_socket.IDENTITY.decode('utf-8'),
-                #         "quorum_id": request['quorum_id']
-                #     }
-                #     self.node_socket.send_json(response)
-                #     continue
-
                 case MessageType.COORDINATE_PUT:
                     self.coordinated_quorums_queue.put(request)
                     continue
 
-                case MessageType.DELETE:
-                    key = request['key']
-                    response = {
-                        "type": MessageType.DELETE_RESPONSE,
-                        "key": key,
-                        "value": self.dynamo_node.delete_data(key),
-                        "address": self.node_socket.IDENTITY.decode('utf-8'),
-                        "quorum_id": request['quorum_id']
-                    }
-                    # time.sleep(1)
-                    self.node_socket.send_json(response)
+                case MessageType.COORDINATE_GET:
+                    self.coordinated_quorums_queue.put(request)
+                    continue
+
+                case MessageType.COORDINATE_DELETE:
+                    self.coordinated_quorums_queue.put(request)
+
 
                 case MessageType.REGISTER_RESPONSE:
                     # print(request)
@@ -298,18 +247,18 @@ class Node:
 
     def send_request_to_other_nodes(self, request_type, request, nodes, timeout, max_retries, quorum_size):
         quorum_id = request['quorum_id']
-        # if request_type == MessageType.GET:
-        #     self.read_quorum_requests_state[quorum_id] = build_quorum_request_state(nodes, timeout, max_retries,
-        #                                                                             quorum_size)
-        #     current_quorum_state = self.read_quorum_requests_state[quorum_id]
+        if request_type == MessageType.GET:
+            self.read_quorum_requests_state[quorum_id] = build_quorum_request_state(nodes, timeout, max_retries,
+                                                                                    quorum_size)
+            current_quorum_state = self.read_quorum_requests_state[quorum_id]
         if request_type == MessageType.PUT:
             self.write_quorum_requests_state[quorum_id] = build_quorum_request_state(nodes, timeout, max_retries,
-                                                                                quorum_size)
+                                                                                     quorum_size)
             current_quorum_state = self.write_quorum_requests_state[quorum_id]
-        # elif request_type == MessageType.DELETE:
-        #     self.delete_quorum_requests_state[quorum_id] = build_quorum_request_state(nodes, timeout, max_retries,
-        #                                                                               quorum_size)
-        #     current_quorum_state = self.delete_quorum_requests_state[quorum_id]
+        elif request_type == MessageType.DELETE:
+            self.delete_quorum_requests_state[quorum_id] = build_quorum_request_state(nodes, timeout, max_retries,
+                                                                                      quorum_size)
+            current_quorum_state = self.delete_quorum_requests_state[quorum_id]
 
         start_time = time.time()
         # TODO should the condition be the length of the most common response?
@@ -338,7 +287,14 @@ class Node:
     def send_put_request_to_other_nodes(self, request, nodes, timeout, max_retries, quorum_size):
         return self.send_request_to_other_nodes(MessageType.PUT, request, nodes, timeout, max_retries, quorum_size)
 
+    def send_get_request_to_other_nodes(self, request, nodes, timeout, max_retries, quorum_size):
+        return self.send_request_to_other_nodes(MessageType.GET, request, nodes, timeout, max_retries, quorum_size)
+
+    def send_delete_request_to_other_nodes(self, request, nodes, timeout, max_retries, quorum_size):
+        return self.send_request_to_other_nodes(MessageType.DELETE, request, nodes, timeout, max_retries, quorum_size)
+
     def coordinate_quorums(self, tasks_queue):
+        print("coordinating quorums")
         while True:
             task = tasks_queue.get()
             if task is None:  # poison pill
@@ -349,10 +305,11 @@ class Node:
                     quorum_id = task["quorum_id"]
                     key = task["key"]
                     value = task["value"]
-                    request_to_replicas = build_quorum_put_request(key, value, quorum_id)
+                    request_to_replicas = build_put_request(key, value, quorum_id)
 
                     result = ([self.dynamo_node.write_data(key, value)] +
-                              self.send_put_request_to_other_nodes(request_to_replicas, task['replicas'], 5, 1, W_QUORUM))
+                              self.send_put_request_to_other_nodes(request_to_replicas, task['replicas'], 5, 1,
+                                                                   W_QUORUM))
 
                     print(result)
                     # if len(result) < W_QUORUM:
@@ -362,8 +319,72 @@ class Node:
                     response_to_router = build_quorum_put_response(quorum_id, result)
                     self.node_socket.send_json(response_to_router)
 
+                case MessageType.COORDINATE_GET:
+                    quorum_id = task["quorum_id"]
+                    key = task["key"]
+                    request_to_replicas = build_get_request(key, quorum_id)
+
+                    result = ([self.dynamo_node.read_data(key)] +
+                              self.send_get_request_to_other_nodes(request_to_replicas, task['replicas'], 5, 1,
+                                                                   R_QUORUM))
+
+                    print(result)
+                    # if len(result) < W_QUORUM:
+                    #     return None
+                    # todo validate if all results are the same
+
+                    response_to_router = build_quorum_get_response(quorum_id, result)
+                    self.node_socket.send_json(response_to_router)
+
+                case MessageType.COORDINATE_DELETE:
+                    quorum_id = task["quorum_id"]
+                    key = task["key"]
+                    request_to_replicas = build_delete_request(key, quorum_id)
+
+                    result = ([self.dynamo_node.read_data(key)] +
+                              self.send_delete_request_to_other_nodes(request_to_replicas, task['replicas'], 5, 1,
+                                                                      R_QUORUM))
+
+                    print(result)
+                    # if len(result) < W_QUORUM:
+                    #     return None
+                    # todo validate if all results are the same
+
+                    response_to_router = build_quorum_delete_response(quorum_id, result)
+                    self.node_socket.send_json(response_to_router)
+
+    def handle_request_response(self, request_type_quorums_state, json_request):
+        request_id = json_request['quorum_id']
+        if request_id in request_type_quorums_state:
+            if json_request['address'] not in request_type_quorums_state[request_id]['nodes_with_reply']:
+                request_type_quorums_state[request_id]['nodes_with_reply'].add(json_request['address'])
+                request_type_quorums_state[request_id]['responses'].append(json_request['value'])
+                request_type_quorums_state[request_id]['retry_info'][json_request['address']] += 1
+        else:
+            print(f"{request_type_quorums_state}::Received a response for a request that was already processed")
+
+    def handle_request(self, message_type, json_request, sender_identity):
+        key = json_request['key']
+        if message_type == MessageType.PUT:
+            value = json_request['value']
+            value = self.dynamo_node.write_data(key, ShoppingList.from_dict(json.loads(value)))
+        elif message_type == MessageType.GET:
+            value = self.dynamo_node.read_data(key)
+        elif message_type == MessageType.DELETE:
+            value = self.dynamo_node.delete_data(key)
+
+        response = {
+            "type": message_type + "_RESPONSE",
+            "key": key,
+            "value": value,
+            "address": self.node_socket.IDENTITY.decode('utf-8'),
+            "quorum_id": json_request['quorum_id']
+        }
+        self.send_push_message(self.node_socket.IDENTITY, sender_identity.decode('utf-8'), json.dumps(response))
 
     def listen_for_nodes(self):
+        print("listening for nodes")
+        """Messages from other nodes, get, put, delete received from a coordinator or the coordinator itself receives _responses"""
         i = 0
         node_address = self.reply_socket.IDENTITY
         while True:
@@ -377,52 +398,32 @@ class Node:
 
             match get_request_type(json_request):
                 case MessageType.PUT_RESPONSE:
-                    request_id = json_request['quorum_id']
-                    if request_id in self.write_quorum_requests_state:
-                        # print("PUT::Received a new response")
-                        # if the request is in the read quorum requests state, add the response to the responses list
-                        if json_request['address'] not in self.write_quorum_requests_state[request_id]['nodes_with_reply']:
-                            self.write_quorum_requests_state[request_id]['nodes_with_reply'].add(json_request['address'])
-                            self.write_quorum_requests_state[request_id]['responses'].append(json_request['value'])
-                            self.write_quorum_requests_state[request_id]['retry_info'][json_request['address']] += 1
-                    else:
-                        print("PUT::Received a response for a request that was already processed")
-                        continue
-
-                case MessageType.PUT:
-                    key = json_request['key']
-                    value = json_request['value']
-
-                    response = {
-                        "type": MessageType.PUT_RESPONSE,
-                        "key": key,
-                        "value": self.dynamo_node.write_data(key, ShoppingList.from_dict(json.loads(value))),
-                        "address": self.node_socket.IDENTITY.decode('utf-8'),
-                        "quorum_id": json_request['quorum_id']
-                    }
-                    # self.node_socket.send_json(response)
-                    self.send_push_message(self.node_socket.IDENTITY, sender_identity.decode('utf-8'), json.dumps(response))
+                    self.handle_request_response(self.write_quorum_requests_state, json_request)
                     continue
 
-                # print(message)
-                # print(f"Received reply from {address}: {message}")
+                case MessageType.GET_RESPONSE:
+                    self.handle_request_response(self.read_quorum_requests_state, json_request)
+                    continue
 
-                # address = sender_identity.decode('utf-8')
-                # print("Received reply from " + address)
-                # # reply_socket.send_json({0: "OK"})
-                # push_socket = self.context.socket(zmq.PUSH)
-                # push_socket.connect(address)
-                # push_socket.send_multipart([node_address, json.dumps(build_register_request("ok")).encode('utf-8')])
-                # push_socket.close()
-                # i += 1
+                case MessageType.DELETE_RESPONSE:
+                    self.handle_request_response(self.delete_quorum_requests_state, json_request)
+                    continue
 
+                case MessageType.PUT:
+                    self.handle_request(MessageType.PUT, json_request, sender_identity)
+                    continue
 
+                case MessageType.GET:
+                    self.handle_request(MessageType.GET, json_request, sender_identity)
+                    continue
+
+                case MessageType.DELETE:
+                    self.handle_request(MessageType.DELETE, json_request, sender_identity)
+                    continue
 if __name__ == "__main__":
     if len(sys.argv) != 2:
         print("Usage: python node.py <port>")
         sys.exit(1)
-
-    print("Debugger plz, don't use cached version")
 
     port = sys.argv[1]
     node_address = f"tcp://localhost:{port}"

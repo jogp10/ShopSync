@@ -62,7 +62,6 @@ class ShoppingList:
     def to_json_string(self):
         return json.dumps(self, indent=2, default=lambda x: x.__dict__)
 
-
     @staticmethod
     def from_dict(d: dict):
         parsed_items = ShoppingListCRDT.from_dict(d['items'])

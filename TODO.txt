@@ -3,20 +3,18 @@ NOTA: há mais todos pelo código que não estão aqui
 HIGH:
 - local storage nodes e cliente. sql, ficheiros??
 - cada node deve ter o seu hashring e haver gossip entre eles para atualizar os hashrings?
-- comunicação entre nodes? são ambos dealers, não parece dar
-
+- meter quorums a verificar validez. é preciso haver concorância nos resultados. se não retorna-se ao cliente erro, volta-se a tentar??
+- gossip / hinted handoff
+- hinted handoff implica suspender nodes antes de os remover?
+- mais q 1 router???
 
 MEDIUM:
-- meter quorums a verificar validez. é preciso haver concorância nos resultados. se não retorna-se ao cliente erro, volta-se a tentar??
-- para load balancing guardar histórico de nós requisitados?  e / ou ver um algoritmo de distribuição de carga. POUCO PRIORITÁRIO
-- compôr estrutura e nomenclatura. ou seja, os clientes chamam as funçóes de incremento de decremento do crdt
-- delete shopping list
-- guardar estado dos nodes à semelhança dos pedidos de quorum no load balancer?
-
 
 LOW:
+- para load balancing guardar histórico de nós requisitados?  e / ou ver um algoritmo de distribuição de carga. POUCO PRIORITÁRIO
 - transformar pedidos do cliente em ações (delete é um dec, etc...)
 - se é 0 não deve aparecer na lista
+
 - criar wrappers para send e receive
 
 

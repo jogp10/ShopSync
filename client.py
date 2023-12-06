@@ -49,15 +49,14 @@ class Client:
         self.shopping_lists.append(shopping_list)
         return shopping_list
 
-
-    #Functions for database handling
+    # Functions for database handling
     def create_database_and_table(self):
         transformed_username = self.username.replace(' ', '_').replace(":", "_").replace("/", "-")
         db_folder = f"db/{transformed_username}/"
 
         if not os.path.exists(db_folder):
             os.makedirs(db_folder)
-        
+
         conn = sqlite3.connect(os.path.join(db_folder, "client.db"))
         cursor = conn.cursor()
 
@@ -69,7 +68,6 @@ class Client:
                 items TEXT
             )
         ''')
-
 
         conn.commit()
         conn.close()
@@ -91,7 +89,7 @@ class Client:
         conn.close()
 
         # Convert the JSON strings back to Python dictionaries
-    
+
         for row in data:
             items_dict = json.loads(row[2])
             shopping_list = {
@@ -100,9 +98,10 @@ class Client:
                 "items": items_dict
             }
             self.shopping_lists.append(ShoppingList.from_dict(shopping_list))
-    
+
     def save_database_data(self):
-        transformed_username = transformed_username = self.username.replace(' ', '_').replace(":", "_").replace("/", "-")
+        transformed_username = transformed_username = self.username.replace(' ', '_').replace(":", "_").replace("/",
+                                                                                                                "-")
         conn = sqlite3.connect(os.path.join("db", transformed_username, "client.db"))
         cursor = conn.cursor()
 
@@ -112,10 +111,10 @@ class Client:
         for shopping_list in self.shopping_lists:
             shopping_list_dict = shopping_list.to_dict()
             items_json = shopping_list_dict["items"].to_json_string()
-    
+
             cursor.execute("INSERT INTO shopping_list (id, name, items) VALUES (?, ?, ?)",
-                   (shopping_list_dict["id"], shopping_list_dict["name"], items_json))
-        
+                           (shopping_list_dict["id"], shopping_list_dict["name"], items_json))
+
         conn.commit()
         conn.close()
 
@@ -131,20 +130,19 @@ class Client:
 
     def fetch_shopping_list(self, list_id):
         request = {
-            "type": MessageType.GET, # :()
+            "type": MessageType.GET,  # :()
             "key": list_id
         }
 
         self.socket.send_json(request, zmq.NOBLOCK)
         response = self.socket.recv_json()
-        
+
         print(response)
 
-        #TODO: UNCOMMENT AFTER QUORUM IS DONE
+        # TODO: UNCOMMENT AFTER QUORUM IS DONE
 
-        #shopping_list_fetched = ShoppingList.from_dict(json.loads(response))
+        # shopping_list_fetched = ShoppingList.from_dict(json.loads(response))
         #
-        
 
     def delete_shopping_list(self, list_id):
         request = {
@@ -154,8 +152,6 @@ class Client:
         self.socket.send_json(request, zmq.NOBLOCK)
         response = self.socket.recv_json()
         print(response)
-
-
 
 
 def ask_for_items():
@@ -179,6 +175,7 @@ def show_available_lists(client: Client):
         print(f"{idx + 1}. {shopping_list.name} (ID: {shopping_list.id})")
     return (1, client.shopping_lists.__len__())
 
+
 def get_int_from_user(prompt: str, min: int = -9999, max: int = 9999):
     while True:
         try:
@@ -190,21 +187,21 @@ def get_int_from_user(prompt: str, min: int = -9999, max: int = 9999):
         except ValueError:
             print("Please enter a number")
 
+
 if __name__ == "__main__":
     if len(sys.argv) != 2:
         print("Usage: python client.py <port>")
         sys.exit(1)
-    
 
     port = sys.argv[1]  # the identity can be anything, the port is not being used by the dealer socket
     client_address = f"tcp://localhost:{port}"
 
     server_address = ROUTER_ADDRESS
     client = Client(server_address, client_address)
-    
+
     client.get_database_data()
 
-    #ensure that at exit always do a local save
+    # ensure that at exit always do a local save
     atexit.register(client.save_database_data)
 
     while True:
@@ -235,10 +232,11 @@ if __name__ == "__main__":
             if (max == 0):
                 continue
 
-            list_index = get_int_from_user("Enter the number of the shopping list to which you want to add an item: ", min, max) - 1
-        
+            list_index = get_int_from_user("Enter the number of the shopping list to which you want to add an item: ",
+                                           min, max) - 1
+
             shopping_list: ShoppingList = client.shopping_lists[list_index]
-                    
+
             while True:
                 item = input("Enter the item to add: ")
 
@@ -261,7 +259,8 @@ if __name__ == "__main__":
             if max == 0:
                 continue
 
-            list_index = get_int_from_user("Enter the number of the shopping list to which you want to change an item: ", min, max) - 1
+            list_index = get_int_from_user(
+                "Enter the number of the shopping list to which you want to change an item: ", min, max) - 1
 
             shopping_list: ShoppingList = client.shopping_lists[list_index]
             shopping_list.print_items()
@@ -272,19 +271,19 @@ if __name__ == "__main__":
 
             while True:
                 item = input("Enter the item to change: ")
-                #Check if item exists
+                # Check if item exists
                 if not shopping_list.item_exists(item):
                     print("Item does not exist!")
                     continue
                 break
-            
+
             quantity = get_int_from_user("Enter the increase or decrease value: ")
             shopping_list.change_item_quantity((item, quantity), client.username)
-        
+
         elif choice == '5':
             (min, max) = show_available_lists(client)
 
-            if max == 0: 
+            if max == 0:
                 continue
 
             list_index = get_int_from_user("Enter the number of the shopping list to print: ", min, max) - 1
@@ -293,7 +292,7 @@ if __name__ == "__main__":
 
         elif choice == '6':
             (min, max) = show_available_lists(client)
-            
+
             if max == 0:
                 continue
 
@@ -311,10 +310,11 @@ if __name__ == "__main__":
             if max == 0:
                 continue
 
-            list_index = get_int_from_user("Enter the number of the shopping list to delete permanently: ", min, max) - 1
+            list_index = get_int_from_user("Enter the number of the shopping list to delete permanently: ", min,
+                                           max) - 1
             shopping_list: ShoppingList = client.shopping_lists[list_index]
 
-            #delete locally, this will alter the database in the exit
+            # delete locally, this will alter the database in the exit
             client.shopping_lists.remove(shopping_list)
 
             # TODO: delete from cloud, CHECK IF WORKS
@@ -333,7 +333,7 @@ if __name__ == "__main__":
             for shopping_list in client.shopping_lists:
                 print("Stroring shopping list " + shopping_list.name + " to cloud...")
                 client.store_shopping_list_online(shopping_list)
-                
+
         elif choice == '11':
             # Store all shopping lists to cloud
             for shopping_list in client.shopping_lists:
@@ -350,5 +350,5 @@ if __name__ == "__main__":
         else:
             print("Invalid choice!")
 
-        #Ask the user to press 'c' to continue to the main menu
+        # Ask the user to press 'c' to continue to the main menu
         input("(---Press any key to continue to the main menu---)")

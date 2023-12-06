@@ -2,8 +2,7 @@
 # enum for request types
 import time
 import uuid
-from enum import Enum, IntEnum
-
+from enum import Enum, IntEnum, StrEnum
 
 ROUTER_ADDRESS = "tcp://localhost:5554"
 ROUTER_BIND_ADDRESS = "tcp://*:5554"
@@ -11,34 +10,31 @@ R_QUORUM = 2
 W_QUORUM = 3
 N = 4
 TIMEOUT_THRESHOLD = 500
-MONITOR_INTERVAL = 3
-
-class MessageType(IntEnum):
-    GET = 1
-    PUT = 2
-    DELETE = 3
-    GET_RESPONSE = 4
-    PUT_RESPONSE = 5
-    DELETE_RESPONSE = 6
-    REGISTER = 7
-    REGISTER_RESPONSE = 8
-    HEARTBEAT = 9
-    HEARTBEAT_RESPONSE = 10
-    COORDINATE_PUT = 11
-    COORDINATE_PUT_RESPONSE = 12
-    COORDINATE_GET = 13
-    COORDINATE_GET_RESPONSE = 14
+MONITOR_INTERVAL = 30
 
 
-def build_get_request(key):
-    """given a key, return a json for a get request of that key"""
-    return {
-        "type": MessageType.GET,
-        "key": key
-    }
+class MessageType(StrEnum):
+    GET = 'GET'
+    PUT = 'PUT'
+    DELETE = 'DELETE'
+    GET_RESPONSE = 'GET_RESPONSE'
+    PUT_RESPONSE = 'PUT_RESPONSE'
+    DELETE_RESPONSE = 'DELETE_RESPONSE'
+    REGISTER = 'REGISTER'
+    REGISTER_RESPONSE = 'REGISTER_RESPONSE'
+    HEARTBEAT = 'HEARTBEAT'
+    HEARTBEAT_RESPONSE = 'HEARTBEAT_RESPONSE'
+    COORDINATE_PUT = 'COORDINATE_PUT'
+    COORDINATE_PUT_RESPONSE = 'COORDINATE_PUT_RESPONSE'
+    COORDINATE_GET = 'COORDINATE_GET'
+    COORDINATE_GET_RESPONSE = 'COORDINATE_GET_RESPONSE'
+    COORDINATE_DELETE = 'COORDINATE_DELETE'
+    COORDINATE_DELETE_RESPONSE = 'COORDINATE_DELETE_RESPONSE'
+    HINTED_HANDOFF = 'HINTED_HANDOFF'
+    HINTED_HANDOFF_RESPONSE = 'HINTED_HANDOFF_RESPONSE'
 
 
-def build_quorum_get_request(key, quorum_id):
+def build_get_request(key, quorum_id=''):
     """given a key, return a json for a get request of that key"""
     return {
         "type": MessageType.GET,
@@ -47,12 +43,23 @@ def build_quorum_get_request(key, quorum_id):
     }
 
 
-def build_put_request(key, value):
+def build_quorum_get_request(key, quorum_id, replicas=[]):
+    """given a key, return a json for a get request of that key"""
+    return {
+        "type": MessageType.COORDINATE_GET,
+        "key": key,
+        "quorum_id": quorum_id,
+        "replicas": replicas  # todo remove once nodes have their own hashring
+    }
+
+
+def build_put_request(key, value, quorum_id=''):
     """given a key and a value, return a json for a put request of that key and value"""
     return {
         "type": MessageType.PUT,
         "key": key,
         "value": value,
+        "quorum_id": quorum_id
     }
 
 
@@ -66,6 +73,7 @@ def build_quorum_put_request(key, value, quorum_id, replicas=[]):
         "replicas": replicas  # todo remove once nodes have their own hashring
     }
 
+
 def build_quorum_put_response(quorum_id, result):
     """given the quorum id and the results, return a json for a put request response"""
     return {
@@ -74,17 +82,40 @@ def build_quorum_put_response(quorum_id, result):
         "quorum_id": quorum_id
     }
 
-def build_delete_request(key):
+
+def build_quorum_get_response(quorum_id, result):
+    """given the quorum id and the results, return a json for a put request response"""
     return {
-        "type": MessageType.DELETE,
-        "key": key
+        "type": MessageType.COORDINATE_GET_RESPONSE,
+        "result": result,
+        "quorum_id": quorum_id
     }
 
-def build_quorum_delete_request(key, quorum_id):
+
+def build_quorum_delete_response(quorum_id, result):
+    """given the quorum id and the results, return a json for a put request response"""
+    return {
+        "type": MessageType.COORDINATE_DELETE_RESPONSE,
+        "result": result,
+        "quorum_id": quorum_id
+    }
+
+
+def build_delete_request(key, quorum_id=''):
     return {
         "type": MessageType.DELETE,
         "key": key,
         "quorum_id": quorum_id
+
+    }
+
+
+def build_quorum_delete_request(key, quorum_id, replicas=[]):
+    return {
+        "type": MessageType.COORDINATE_DELETE,
+        "key": key,
+        "quorum_id": quorum_id,
+        "replicas": replicas  # todo remove once nodes have their own hashring
     }
 
 
@@ -148,3 +179,5 @@ def get_most_common_value(values):
 
 def valid_heartbeat(node_activity):
     return time.time() - node_activity['last_time_active'] < TIMEOUT_THRESHOLD
+
+
