@@ -157,7 +157,7 @@ class Client:
 
         if response:
             print("Shopping list fetched successfully")
-            shopping_list_fetched = ShoppingList.from_dict(json.loads(response["result"]))
+            shopping_list_fetched = ShoppingList.from_dict(json.loads(response))
             # get index of shopping list with the same id
             shopping_list_ids = [shopping_list.id for shopping_list in self.shopping_lists]
             try:
