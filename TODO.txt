@@ -7,6 +7,7 @@ HIGH:
 - mais q 1 router???
 
 MEDIUM:
+- fazer merge nos writes?
 
 LOW:
 - para load balancing guardar histórico de nós requisitados?  e / ou ver um algoritmo de distribuição de carga. POUCO PRIORITÁRIO

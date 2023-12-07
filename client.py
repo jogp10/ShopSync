@@ -157,7 +157,7 @@ class Client:
 
         if response:
             print("Shopping list fetched successfully")
-            shopping_list_fetched = ShoppingList.from_dict(json.loads(response["result"]))
+            shopping_list_fetched = ShoppingList.from_dict(json.loads(response))
             # get index of shopping list with the same id
             shopping_list_ids = [shopping_list.id for shopping_list in self.shopping_lists]
             try:
@@ -235,14 +235,14 @@ def get_int_from_user(prompt: str, min: int = -9999, max: int = 9999):
 
 
 if __name__ == "__main__":
-    '''
+
     if len(sys.argv) != 2:
         print("Usage: python client.py <port>")
         sys.exit(1)
 
     port = sys.argv[1]  # the identity can be anything, the port is not being used by the dealer socket
-    '''
-    port = 1000
+
+    # port = 1000
     client_address = f"tcp://localhost:{port}"
 
     server_address = ROUTER_ADDRESS

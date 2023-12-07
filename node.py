@@ -39,6 +39,8 @@ class DynamoNode:
 
     def read_data(self, list_id):
         if self.data.get(list_id) is None:
+            # todo ask for missing lists?
+            # when adding a node it has to receive any missing lists
             return None
         else:
             list_name = self.data[list_id][0].name
@@ -194,6 +196,8 @@ class Node:
         # Create a DynamoNode instance for this node
         self.dynamo_node = DynamoNode(node_address)
 
+        self.nodes_health = {}
+
     def start(self):
         self.dynamo_node.get_database_data()
 
@@ -206,7 +210,7 @@ class Node:
         reply_thread = threading.Thread(target=self.listen_for_nodes)
         reply_thread.start()
 
-        # Start listening for messages from the router
+        # Start listening for messages from the ROUTER
         while True:
             request = self.node_socket.recv_json()
             print(request)
@@ -225,7 +229,6 @@ class Node:
                 case MessageType.COORDINATE_DELETE:
                     self.coordinated_quorums_queue.put(request)
                     continue
-
 
                 case MessageType.REGISTER_RESPONSE:
                     # print(request)
@@ -248,6 +251,9 @@ class Node:
         push_socket.close()
 
     def send_request_to_other_nodes(self, request_type, request, nodes, timeout, max_retries, quorum_size):
+
+        healthy, unhealthy = self.check_nodes_health(nodes)
+
         quorum_id = request['quorum_id']
         quorum_size = min(quorum_size, len(set(nodes)))
         print(f"Sending request to other nodes with quorum size {quorum_size}")
@@ -300,6 +306,60 @@ class Node:
     def send_delete_request_to_other_nodes(self, request, nodes, timeout, max_retries, quorum_size):
         return self.send_request_to_other_nodes(MessageType.DELETE, request, nodes, timeout, max_retries, quorum_size)
 
+    def check_nodes_health(self, nodes):
+        nodes_set = set(nodes)
+        for node in nodes_set:
+            self.send_push_message(self.node_socket.IDENTITY, node, json.dumps({"type": MessageType.HEALTH_CHECK}))
+
+        start_time = time.time()
+        all_ok = False
+        while time.time() - start_time < HEALTH_CHECK_TIMEOUT:
+            if all([self.nodes_health.get(node, False) for node in nodes_set]):
+                all_ok = True
+                break
+
+        if not all_ok:
+
+            print("Some nodes are not healthy. Preparing for hinted handoff and marking as suspended.", file=sys.stderr)
+            [print(node) for node in nodes_set if not self.nodes_health.get(node, False)]
+
+        healthy = []
+        unhealthy = []
+        [healthy.append(node) if self.nodes_health.get(node, False) else unhealthy.append(node) for node in nodes_set]
+        for node in nodes_set: self.nodes_health[node] = False
+
+        return healthy, unhealthy
+
+    def check_node_health(self, node_address):
+
+        # todo just send an heartbeat outside the message to all nodes and then check if valid
+
+        # Create a message
+        message = {"type": MessageType.HEALTH_CHECK}
+        # Send a HEALTH_CHECK message
+        push_socket = self.context.socket(zmq.PUSH)
+        push_socket.connect(node_address)
+        print([self.node_socket.IDENTITY, json.dumps(message).encode('utf-8')])
+        push_socket.send_multipart([self.node_socket.IDENTITY, json.dumps(message).encode('utf-8')])
+        push_socket.close()
+
+        start_time = time.time()
+        while True:
+            try:
+                self.reply_socket.recv(zmq.NOBLOCK)
+                break
+            except zmq.error.Again:
+                if time.time() - start_time > 0.2:
+                    print(f"Node {node_address} is not healthy. Preparing for hinted handoff and marking as suspended.")
+                    return False
+                else:
+                    continue
+        # TODO: Implement hinted handoff and mark node as suspended
+
+        print(f"Node {node_address} is healthy.")
+
+        return True
+
     def coordinate_quorums(self, tasks_queue):
         print("coordinating quorums")
         while True:
@@ -313,7 +373,6 @@ class Node:
                     key = task["key"]
                     value = task["value"]
                     request_to_replicas = build_put_request(key, value, quorum_id)
-
 
                     result = ([self.dynamo_node.write_data(key, ShoppingList.from_dict(json.loads(value)))] +
                               self.send_put_request_to_other_nodes(request_to_replicas, task['replicas'], 5, 1,
@@ -335,11 +394,13 @@ class Node:
                     key = task["key"]
                     request_to_replicas = build_get_request(key, quorum_id)
 
-                    result = ([self.dynamo_node.read_data(key)] +
+                    tmp_result = ([self.dynamo_node.read_data(key)] +
                               self.send_get_request_to_other_nodes(request_to_replicas, task['replicas'], 5, 1,
                                                                    R_QUORUM))
 
-                    print(result)
+                    print(tmp_result)
+                    # exclude Nones from the list
+                    result = [item for item in tmp_result if item is not None]
                     quorum_size = min(R_QUORUM, len(set(task['replicas'])) + 1)
                     if len(result) < quorum_size:
                         result = False
@@ -438,6 +499,19 @@ class Node:
                 case MessageType.DELETE:
                     self.handle_request(MessageType.DELETE, json_request, sender_identity)
                     continue
+
+                case MessageType.HEALTH_CHECK:
+                    # If a HEALTH_CHECK message is received, send a HEALTH_CHECK_RESPONSE message
+                    response = {"type": MessageType.HEALTH_CHECK_RESPONSE}
+                    self.send_push_message(self.node_socket.IDENTITY, sender_identity.decode('utf-8'),
+                                           json.dumps(response))
+                    continue
+
+                case MessageType.HEALTH_CHECK_RESPONSE:
+                    self.nodes_health[sender_identity.decode('utf-8')] = True
+                    continue
+
+
 if __name__ == "__main__":
     if len(sys.argv) != 2:
         print("Usage: python node.py <port>")
