@@ -9,6 +9,8 @@ import matplotlib.pyplot as plt
 import zmq
 import threading
 from utils import *
+from bstar_utils import *
+import time
 
 
 class HashRing:
@@ -96,8 +98,30 @@ class HashRing:
 
 class Router:
 
-    def __init__(self, nodes=[], replica_count=3):
+    '''
+    primary: bool -> True if the primary router, false if the backup
+    address: str -> str with bind address
+    nodes: list -> list of nodes (default [] and router discovers the nodes)
+    replica_count: int -> number of replicas
+    '''
+    
+    def __init__(self, primary: bool, address: str, nodes=[], replica_count=3):
         self._context = zmq.Context()
+
+        self.fsm = BStarState(0, 0, 0)
+
+        
+        if primary:
+            print("I: Primary master, waiting for backup (slave)")
+            self.fsm.state = STATE_PRIMARY
+            self.local_socket = ROUTER_ADDRESS_LOCAL_PEER
+            self.remote_socket = ROUTER_ADDRESS_REMOTE_PEER
+        else:
+            print("I: Backup slave, waiting for primary (master)")
+            self.fsm.state = STATE_BACKUP
+            self.local_socket = ROUTER_BACKUP_ADDRESS_LOCAL_PEER
+            self.remote_socket = ROUTER_BACKUP_ADDRESS_REMOTE_PEER
+
         self.sockets = {}
         self.threads = {}
         self.nodes = nodes
@@ -118,9 +142,25 @@ class Router:
 
         # hinted hand-off todo
 
-        router_address = ROUTER_BIND_ADDRESS
+        #ROUTER ATTR
+        self.statepub = self._context.socket(zmq.PUB)
+        self.statesub = self._context.socket(zmq.SUB)
+        self.statesub.setsockopt_string(zmq.SUBSCRIBE, "")
+
+        router_address = address
         self.router_socket = self._context.socket(zmq.ROUTER)
         self.router_socket.bind(router_address)
+
+        self.statepub.bind(self.local_socket)
+        self.statesub.connect(self.remote_socket)
+        self.statesub.setsockopt_string(zmq.SUBSCRIBE, "")
+
+        self.poller = zmq.Poller()
+        self.poller.register(self.router_socket, zmq.POLLIN)
+        self.poller.register(self.statesub, zmq.POLLIN)
+
+        self.send_state_at = int(time.time() * 1000 + HEARTBEAT_BSTAR)
+
 
     def add_node(self, node_address):
         print(f"Adding node {node_address}")
@@ -269,23 +309,65 @@ class Router:
 
     def listen_for_client_requests(self):
         """Actually not just clients, needs another name"""
-        client_request_types = [MessageType.GET, MessageType.PUT, MessageType.DELETE]
         while True:
-            identity, message = self.router_socket.recv_multipart()
-            json_request = json.loads(message)
-            print(json_request)
+            time_left = self.send_state_at - int(time.time() * 1000)
+            if time_left < 0:
+                time_left = 0
+            try:
+                socks = dict(self.poller.poll(time_left))
+            except zmq.error.ZMQError:
+                print("Error")
+                break
+            if socks.get(self.router_socket) == zmq.POLLIN:
+                self.handle_router_message()
+            
+            if socks.get(self.statesub) == zmq.POLLIN:
+                self.handle_state_message()
+
+            if int(time.time() * 1000) >= self.send_state_at:
+                self.send_state_message()
+
+    def handle_state_message(self):
+        msg = self.statesub.recv()
+        self.fsm.event = int(msg)
+        print(self.fsm.state, self.fsm.event)
+        del msg
+        try:
+            run_fsm(self.fsm)
+            self.fsm.peer_expiry = int(time.time() * 1000) + (2 * HEARTBEAT_BSTAR)
+        except BStarException:
+            pass
+
+
+    def send_state_message(self):
+        self.statepub.send_string("%d" % self.fsm.state)
+        self.send_state_at = int(time.time() * 1000) + HEARTBEAT_BSTAR
+
+    def handle_router_message(self):
+        client_request_types = [MessageType.GET, MessageType.PUT, MessageType.DELETE]
+
+        identity, message = self.router_socket.recv_multipart()
+        json_request = json.loads(message)
+        print(json_request)
+
+        self.fsm.event = CLIENT_REQUEST
+
+        try:
+            run_fsm(self.fsm)
 
             if json_request['type'] not in client_request_types and json_request['type'] != MessageType.REGISTER:
                 if identity.decode('utf-8') in self.activity:
                     self.activity[identity.decode('utf-8')]['last_time_active'] = time.time()
-            if json_request['type'] == MessageType.PUT or json_request['type'] == MessageType.GET or json_request[
-                'type'] == MessageType.DELETE:
+            if json_request['type'] in client_request_types:
                 print("PUT/GET::Received a new request: ", json_request)
                 json_request['address'] = identity.decode('utf-8')
                 self.heavy_tasks_queue.put(json_request)
             elif json_request['type'] != MessageType.HEARTBEAT_RESPONSE:
                 self.tasks_queue.put(json_request)
-            continue
+        except BStarException:
+            pass
+
+
 
     def send_request_to_nodes(self, type, request, nodes, timeout, max_retries, quorum_size):
         quorum_id = request['quorum_id']
@@ -419,13 +501,17 @@ def hash_ring_testing(hash_table):
 
 
 def main():
-    nodes = [
-        "tcp://localhost:5555",
-        "tcp://localhost:5556",
-        "tcp://localhost:5557",
-        "tcp://localhost:5558",
-    ]
-    hash_table = Router(replica_count=24)
+    # Arguments can be either of:
+    #     -p  primary server, at ROUTER_BIND_ADDRESS
+    #     -b  backup server, at ROUTER_BACKUP_BIND_ADDRESS
+    if '-p' in sys.argv:
+        hash_table = Router(primary=True, address=ROUTER_BIND_ADDRESS, replica_count=24)
+    elif '-b' in sys.argv:
+        hash_table = Router(primary=False, address=ROUTER_BACKUP_BIND_ADDRESS, replica_count=24)
+    else:
+        print("Usage: server.py { -p | -b }\n")
+        return
+    
     hash_table.expose()
 
     print(f"Current encoding: {sys.stdin.encoding}")

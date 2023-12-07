@@ -12,18 +12,22 @@ import zmq
 
 from shopping_list import ShoppingList
 from crdt import ShoppingListCRDT
-from utils import ROUTER_ADDRESS, MessageType
+from utils import ROUTER_ADDRESS, ROUTER_BACKUP_ADDRESS, MessageType
 
 
 class Client:
-    def __init__(self, server_address, username):
+    def __init__(self, server_addresses: list[str], username):
         self._context = zmq.Context()
+        self.username = username
+        self.routers = server_addresses
+        self.router_nbr = 0
         self.socket = self._context.socket(zmq.DEALER)
         self.socket.setsockopt(zmq.IDENTITY, username.encode('utf-8'))
-        self.socket.connect(server_address)
-        self.username = username
+        self.socket.connect(self.routers[self.router_nbr])
+        
         self.shopping_lists = []
         self.TIMEOUT = 7 #seconds
+        self.SETTLE_DELAY = 2 #seconds
 
     def create_shopping_list(self, name: str, items: list[tuple[str, int]] = None):
         id = str(uuid4())
@@ -109,6 +113,43 @@ class Client:
 
         merged_data = ShoppingList(list_id, list_name, merged_crdt)
         return merged_data
+    
+    def send_message_to_router(self, request):
+        self.socket.send_json(request, zmq.NOBLOCK)
+        start_time = time.time()
+        servers_tried = 0
+        while True:
+            try:
+                response = self.socket.recv_json(zmq.NOBLOCK)
+                break
+            except zmq.error.Again:
+                if time.time() - start_time > self.TIMEOUT:
+                    print("Timeout: No response from server")
+
+                    #If we have not tried all routers, go to next
+                    if(servers_tried + 1 < len(self.routers)):
+                        #Time to try again on different router
+                        servers_tried += 1
+                        time.sleep(self.SETTLE_DELAY)
+                        self.socket.close()
+                        self.router_nbr = (self.router_nbr + 1) % 2
+                        print(f"Connecting to router at {self.routers[self.router_nbr]}")
+                        self.socket = self._context.socket(zmq.DEALER)
+                        self.socket.setsockopt(zmq.IDENTITY, self.username.encode('utf-8'))
+                        #reconnect and resend request
+                        self.socket.connect(self.routers[self.router_nbr])
+                        self.socket.send_json(request, zmq.NOBLOCK)
+                        start_time = time.time()
+
+                    #All routers are down
+                    else:
+                        print("All routers are down, aborted message")
+                        self.router_nbr = (self.router_nbr + 1) % 2
+                        return
+                else:
+                    continue
+        
+        return response
 
     def store_shopping_list_online(self, shopping_list: ShoppingList):
         request = {
@@ -116,19 +157,9 @@ class Client:
             "key": shopping_list.id,
             "value": json.dumps(shopping_list, default=lambda x: x.__dict__)
         }
-        self.socket.send_json(request, zmq.NOBLOCK)
-        response = False
-        start_time = time.time()
-        while True:
-            try:
-                response = self.socket.recv_json(zmq.NOBLOCK)
-                break
-            except zmq.error.Again:
-                if time.time() - start_time > self.TIMEOUT:
-                    print("Timeout")
-                    return
-                else:
-                    continue
+       
+        response = self.send_message_to_router(request)
+
         if response:
             print("Shopping list stored successfully")
         else:
@@ -140,20 +171,7 @@ class Client:
             "key": list_id
         }
 
-        self.socket.send_json(request, zmq.NOBLOCK)
-        start_time = time.time()
-        response = False
-        while True:
-            try:
-                response = self.socket.recv_json(zmq.NOBLOCK)
-                break
-            except zmq.error.Again:
-                diff = time.time() - start_time
-                if diff > self.TIMEOUT:
-                    print("Timeout")
-                    return
-                else:
-                    continue
+        response = self.send_message_to_router(request)
 
         if response:
             print("Shopping list fetched successfully")
@@ -182,23 +200,13 @@ class Client:
             "type": MessageType.DELETE,
             "key": list_id
         }
-        self.socket.send_json(request, zmq.NOBLOCK)
-        start_time = time.time()
-        response = False
-        while True:
-            try:
-                response = self.socket.recv_json(zmq.NOBLOCK)
-                break
-            except zmq.error.Again:
-                if time.time() - start_time > self.TIMEOUT:
-                    print("Timeout")
-                    return
-                else:
-                    continue
+        
+        response = self.send_message_to_router(request)
+
         if response:
             print("Shopping list deleted successfully")
         else:
-            print("Shopping list deletion failed")
+            print("Shopping list deletion in server failed (deleted locally)")
 
 def ask_for_items():
     items = []
@@ -235,18 +243,18 @@ def get_int_from_user(prompt: str, min: int = -9999, max: int = 9999):
 
 
 if __name__ == "__main__":
-    '''
+    
     if len(sys.argv) != 2:
         print("Usage: python client.py <port>")
         sys.exit(1)
 
     port = sys.argv[1]  # the identity can be anything, the port is not being used by the dealer socket
-    '''
-    port = 1000
+    
     client_address = f"tcp://localhost:{port}"
 
-    server_address = ROUTER_ADDRESS
-    client = Client(server_address, client_address)
+    server_addresses = [ROUTER_ADDRESS, ROUTER_BACKUP_ADDRESS]
+
+    client = Client(server_addresses, client_address)
 
     client.get_database_data()
 
@@ -366,7 +374,6 @@ if __name__ == "__main__":
             # delete locally, this will alter the database in the exit
             client.shopping_lists.remove(shopping_list)
 
-            # TODO: delete from cloud, CHECK IF WORKS
             client.delete_shopping_list(shopping_list.id)
 
             print(f'Shopping list deleted: {shopping_list.name}')
