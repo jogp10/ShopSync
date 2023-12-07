@@ -7,8 +7,12 @@ from uuid import uuid4
 import matplotlib.pyplot as plt
 
 import zmq
+from zmq.eventloop.ioloop import IOLoop, PeriodicCallback
+from zmq.eventloop.zmqstream import ZMQStream
+
 import threading
 from utils import *
+from bstar_utils import *
 
 
 class HashRing:
@@ -100,8 +104,53 @@ class HashRing:
 
 class Router:
 
-    def __init__(self, nodes=[], replica_count=3):
+    '''
+    primary: bool -> True if the primary router, false if the backup
+    address: str -> str with bind address
+    nodes: list -> list of nodes (default [] and router discovers the nodes)
+    replica_count: int -> number of replicas
+    '''
+    def __init__(self, primary: bool, address: str, nodes=[], replica_count=3):
         self._context = zmq.Context()
+
+        #BSTAR ATTR
+        self.loop = IOLoop.instance()
+        
+        if primary:
+            self.state = STATE_PRIMARY
+            self.local_socket = ROUTER_ADDRESS_LOCAL_PEER
+            self.remote_socket = ROUTER_ADDRESS_REMOTE_PEER
+        else:
+            self.state = STATE_BACKUP
+            self.local_socket = ROUTER_BACKUP_ADDRESS_LOCAL_PEER
+            self.remote_socket = ROUTER_BACKUP_ADDRESS_REMOTE_PEER
+
+
+        self.event = None  # Current event -> Is the state of the other peer
+        self.peer_expiry = 0  # When peer is considered 'dead'
+        self.voter_callback = None  # Voting socket handler
+        self.master_callback = None  # Call when become master
+        self.slave_callback = None  # Call when become slave
+
+        # Create publisher for state going to peer
+        self.statepub = self.ctx.socket(zmq.PUB)
+        self.statepub.bind(self.local_socket)
+
+        # Create subscriber for state coming from peer
+        self.statesub = self.ctx.socket(zmq.SUB)
+        self.statesub.setsockopt_string(zmq.SUBSCRIBE, u'')
+        self.statesub.connect(self.remote_socket)
+
+        # wrap statesub in ZMQStream for event triggers
+        self.statesub = ZMQStream(self.statesub, self.loop)
+
+        # setup basic reactor events
+        self.heartbeat = PeriodicCallback(self.send_state,
+                                          HEARTBEAT_BSTAR, self.loop)
+        
+        self.statesub.on_recv(self.recv_state)
+        #END OF BSTAR ATTR
+
         self.sockets = {}
         self.threads = {}
         self.nodes = nodes
@@ -119,9 +168,113 @@ class Router:
         # forwarded_write_quorums[quroum_id][client_address]  is the address of the client that sent the request
         # todo maybe store which nodes are busy at the moment
 
-        router_address = ROUTER_BIND_ADDRESS
+        router_address = address
         self.router_socket = self._context.socket(zmq.ROUTER)
         self.router_socket.bind(router_address)
+
+    #BSTAR FUNCTIONS
+
+    def update_peer_expiry(self):
+        """Update peer expiry time to be 2 heartbeats from now."""
+        self.peer_expiry = time.time() + 2e-3 * HEARTBEAT_BSTAR
+
+    def start(self):
+        self.update_peer_expiry()
+        self.heartbeat.start()
+        return self.loop.start()
+
+    def execute_fsm(self):
+        """Binary Star finite state machine (applies event to state)
+
+        returns True if connections should be accepted, False otherwise.
+        """
+        accept = True
+        if self.state == STATE_PRIMARY:
+            # Primary server is waiting for peer to connect
+            # Accepts CLIENT_REQUEST events in this state
+            if self.event == PEER_BACKUP:
+                print("I: connected to backup (slave), ready as master")
+                self.state = STATE_ACTIVE
+                if self.master_callback:
+                    self.loop.add_callback(self.master_callback)
+            elif self.event == PEER_ACTIVE:
+                print("I: connected to backup (master), ready as slave")
+                self.state = STATE_PASSIVE
+                if self.slave_callback:
+                    self.loop.add_callback(self.slave_callback)
+            elif self.event == CLIENT_REQUEST:
+                if time.time() >= self.peer_expiry:
+                    print("I: request from client, ready as master")
+                    self.state = STATE_ACTIVE
+                    if self.master_callback:
+                        self.loop.add_callback(self.master_callback)
+                else:
+                    # don't respond to clients yet - we don't know if
+                    # the backup is currently Active as a result of
+                    # a successful failover
+                    accept = False
+        elif self.state == STATE_BACKUP:
+            # Backup server is waiting for peer to connect
+            # Rejects CLIENT_REQUEST events in this state
+            if self.event == PEER_ACTIVE:
+                print("I: connected to primary (master), ready as slave")
+                self.state = STATE_PASSIVE
+                if self.slave_callback:
+                    self.loop.add_callback(self.slave_callback)
+            elif self.event == CLIENT_REQUEST:
+                accept = False
+        elif self.state == STATE_ACTIVE:
+            # Server is active
+            # Accepts CLIENT_REQUEST events in this state
+            # The only way out of ACTIVE is death
+            if self.event == PEER_ACTIVE:
+                # Two masters would mean split-brain
+                print("E: fatal error - dual masters, aborting")
+                raise FSMError("Dual Masters")
+        elif self.state == STATE_PASSIVE:
+            # Server is passive
+            # CLIENT_REQUEST events can trigger failover if peer looks dead
+            if self.event == PEER_PRIMARY:
+                # Peer is restarting - become active, peer will go passive
+                print("I: primary (slave) is restarting, ready as master")
+                self.state = STATE_ACTIVE
+            elif self.event == PEER_BACKUP:
+                # Peer is restarting - become active, peer will go passive
+                print("I: backup (slave) is restarting, ready as master")
+                self.state = STATE_ACTIVE
+            elif self.event == PEER_PASSIVE:
+                # Two passives would mean cluster would be non-responsive
+                print("E: fatal error - dual slaves, aborting")
+                raise FSMError("Dual slaves")
+            elif self.event == CLIENT_REQUEST:
+                # Peer becomes master if timeout has passed
+                # It's the client request that triggers the failover
+                assert self.peer_expiry > 0
+                if time.time() >= self.peer_expiry:
+                    # If peer is dead, switch to the active state
+                    print("I: failover successful, ready as master")
+                    self.state = STATE_ACTIVE
+                else:
+                    # If peer is alive, reject connections
+                    accept = False
+            # Call state change handler if necessary
+            if self.state == STATE_ACTIVE and self.master_callback:
+                self.loop.add_callback(self.master_callback)
+        return accept
+
+    def send_state(self):
+        """Publish our state to peer"""
+        self.statepub.send_string("%d" % self.state)
+
+    def recv_state(self, msg):
+        """Receive state from peer, execute finite state machine"""
+        state = msg[0]
+        if state:
+            self.event = int(state)
+            self.update_peer_expiry()
+        self.execute_fsm()
+
+    #END OF BSTAR FUNCTIONS
 
     def add_node(self, node_address):
         print(f"Adding node {node_address}")
@@ -442,7 +595,17 @@ def hash_ring_testing(hash_table):
 
 
 def main():
-    hash_table = Router(replica_count=24)
+    # Arguments can be either of:
+    #     -p  primary server, at ROUTER_BIND_ADDRESS
+    #     -b  backup server, at ROUTER_BACKUP_BIND_ADDRESS
+    if '-p' in sys.argv:
+        hash_table = Router(primary=True, address=ROUTER_BIND_ADDRESS, replica_count=24)
+    elif '-b' in sys.argv:
+        hash_table = Router(primary=False, address=ROUTER_BACKUP_BIND_ADDRESS, replica_count=24)
+    else:
+        print("Usage: bstarsrv2.py { -p | -b }\n")
+        return
+    
     hash_table.expose()
 
     print(f"Current encoding: {sys.stdin.encoding}")
