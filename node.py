@@ -41,6 +41,7 @@ class DynamoNode:
         if self.data.get(list_id) is None:
             return None
         else:
+            print(self.data[list_id])
             list_name = self.data[list_id][0].name
             merged_crdt = ShoppingListCRDT.zero()
             for shopping_list in self.data[list_id]:
@@ -351,7 +352,7 @@ class Node:
                     value = task["value"]
                     request_to_replicas = build_quorum_put_request(key, value, quorum_id)
 
-                    result = ([self.dynamo_node.write_data(key, value)] +
+                    result = ([self.dynamo_node.write_data(key, ShoppingList.from_dict(json.loads(value)))] +
                               self.send_put_request_to_other_nodes(request_to_replicas, task['replicas'], 5, 1, W_QUORUM))
 
                     print(result)

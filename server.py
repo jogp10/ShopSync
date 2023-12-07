@@ -7,8 +7,6 @@ from uuid import uuid4
 import matplotlib.pyplot as plt
 
 import zmq
-from zmq.eventloop.ioloop import IOLoop, PeriodicCallback
-from zmq.eventloop.zmqstream import ZMQStream
 
 import threading
 from utils import *
@@ -112,43 +110,19 @@ class Router:
     '''
     def __init__(self, primary: bool, address: str, nodes=[], replica_count=3):
         self._context = zmq.Context()
+        self.fsm = BStarState(0, 0, 0)
 
-        #BSTAR ATTR
-        self.loop = IOLoop.instance()
         
         if primary:
-            self.state = STATE_PRIMARY
+            print("I: Primary master, waiting for backup (slave)")
+            self.fsm.state = STATE_PRIMARY
             self.local_socket = ROUTER_ADDRESS_LOCAL_PEER
             self.remote_socket = ROUTER_ADDRESS_REMOTE_PEER
         else:
-            self.state = STATE_BACKUP
+            print("I: Backup slave, waiting for primary (master)")
+            self.fsm.state = STATE_BACKUP
             self.local_socket = ROUTER_BACKUP_ADDRESS_LOCAL_PEER
             self.remote_socket = ROUTER_BACKUP_ADDRESS_REMOTE_PEER
-
-
-        self.event = None  # Current event -> Is the state of the other peer
-        self.peer_expiry = 0  # When peer is considered 'dead'
-        self.voter_callback = None  # Voting socket handler
-        self.master_callback = None  # Call when become master
-        self.slave_callback = None  # Call when become slave
-
-        # Create publisher for state going to peer
-        self.statepub = self.ctx.socket(zmq.PUB)
-        self.statepub.bind(self.local_socket)
-
-        # Create subscriber for state coming from peer
-        self.statesub = self.ctx.socket(zmq.SUB)
-        self.statesub.setsockopt_string(zmq.SUBSCRIBE, u'')
-        self.statesub.connect(self.remote_socket)
-
-        # wrap statesub in ZMQStream for event triggers
-        self.statesub = ZMQStream(self.statesub, self.loop)
-
-        # setup basic reactor events
-        self.heartbeat = PeriodicCallback(self.send_state,
-                                          HEARTBEAT_BSTAR, self.loop)
-        
-        self.statesub.on_recv(self.recv_state)
         #END OF BSTAR ATTR
 
         self.sockets = {}
@@ -168,113 +142,24 @@ class Router:
         # forwarded_write_quorums[quroum_id][client_address]  is the address of the client that sent the request
         # todo maybe store which nodes are busy at the moment
 
+        #ROUTER ATTR
+        self.statepub = self._context.socket(zmq.PUB)
+        self.statesub = self._context.socket(zmq.SUB)
+        self.statesub.setsockopt_string(zmq.SUBSCRIBE, "")
+
         router_address = address
         self.router_socket = self._context.socket(zmq.ROUTER)
         self.router_socket.bind(router_address)
 
-    #BSTAR FUNCTIONS
+        self.statepub.bind(self.local_socket)
+        self.statesub.connect(self.remote_socket)
+        self.statesub.setsockopt_string(zmq.SUBSCRIBE, "")
 
-    def update_peer_expiry(self):
-        """Update peer expiry time to be 2 heartbeats from now."""
-        self.peer_expiry = time.time() + 2e-3 * HEARTBEAT_BSTAR
+        self.poller = zmq.Poller()
+        self.poller.register(self.router_socket, zmq.POLLIN)
+        self.poller.register(self.statesub, zmq.POLLIN)
 
-    def start(self):
-        self.update_peer_expiry()
-        self.heartbeat.start()
-        return self.loop.start()
-
-    def execute_fsm(self):
-        """Binary Star finite state machine (applies event to state)
-
-        returns True if connections should be accepted, False otherwise.
-        """
-        accept = True
-        if self.state == STATE_PRIMARY:
-            # Primary server is waiting for peer to connect
-            # Accepts CLIENT_REQUEST events in this state
-            if self.event == PEER_BACKUP:
-                print("I: connected to backup (slave), ready as master")
-                self.state = STATE_ACTIVE
-                if self.master_callback:
-                    self.loop.add_callback(self.master_callback)
-            elif self.event == PEER_ACTIVE:
-                print("I: connected to backup (master), ready as slave")
-                self.state = STATE_PASSIVE
-                if self.slave_callback:
-                    self.loop.add_callback(self.slave_callback)
-            elif self.event == CLIENT_REQUEST:
-                if time.time() >= self.peer_expiry:
-                    print("I: request from client, ready as master")
-                    self.state = STATE_ACTIVE
-                    if self.master_callback:
-                        self.loop.add_callback(self.master_callback)
-                else:
-                    # don't respond to clients yet - we don't know if
-                    # the backup is currently Active as a result of
-                    # a successful failover
-                    accept = False
-        elif self.state == STATE_BACKUP:
-            # Backup server is waiting for peer to connect
-            # Rejects CLIENT_REQUEST events in this state
-            if self.event == PEER_ACTIVE:
-                print("I: connected to primary (master), ready as slave")
-                self.state = STATE_PASSIVE
-                if self.slave_callback:
-                    self.loop.add_callback(self.slave_callback)
-            elif self.event == CLIENT_REQUEST:
-                accept = False
-        elif self.state == STATE_ACTIVE:
-            # Server is active
-            # Accepts CLIENT_REQUEST events in this state
-            # The only way out of ACTIVE is death
-            if self.event == PEER_ACTIVE:
-                # Two masters would mean split-brain
-                print("E: fatal error - dual masters, aborting")
-                raise FSMError("Dual Masters")
-        elif self.state == STATE_PASSIVE:
-            # Server is passive
-            # CLIENT_REQUEST events can trigger failover if peer looks dead
-            if self.event == PEER_PRIMARY:
-                # Peer is restarting - become active, peer will go passive
-                print("I: primary (slave) is restarting, ready as master")
-                self.state = STATE_ACTIVE
-            elif self.event == PEER_BACKUP:
-                # Peer is restarting - become active, peer will go passive
-                print("I: backup (slave) is restarting, ready as master")
-                self.state = STATE_ACTIVE
-            elif self.event == PEER_PASSIVE:
-                # Two passives would mean cluster would be non-responsive
-                print("E: fatal error - dual slaves, aborting")
-                raise FSMError("Dual slaves")
-            elif self.event == CLIENT_REQUEST:
-                # Peer becomes master if timeout has passed
-                # It's the client request that triggers the failover
-                assert self.peer_expiry > 0
-                if time.time() >= self.peer_expiry:
-                    # If peer is dead, switch to the active state
-                    print("I: failover successful, ready as master")
-                    self.state = STATE_ACTIVE
-                else:
-                    # If peer is alive, reject connections
-                    accept = False
-            # Call state change handler if necessary
-            if self.state == STATE_ACTIVE and self.master_callback:
-                self.loop.add_callback(self.master_callback)
-        return accept
-
-    def send_state(self):
-        """Publish our state to peer"""
-        self.statepub.send_string("%d" % self.state)
-
-    def recv_state(self, msg):
-        """Receive state from peer, execute finite state machine"""
-        state = msg[0]
-        if state:
-            self.event = int(state)
-            self.update_peer_expiry()
-        self.execute_fsm()
-
-    #END OF BSTAR FUNCTIONS
+        self.send_state_at = int(time.time() * 1000 + HEARTBEAT_BSTAR)
 
     def add_node(self, node_address):
         print(f"Adding node {node_address}")
@@ -418,32 +303,56 @@ class Router:
         main_thread = threading.Thread(target=self.listen_for_client_requests)
         main_thread.start()
 
-        monitor_thread = threading.Thread(target=self.monitor_nodes)
-        monitor_thread.start()
+        #monitor_thread = threading.Thread(target=self.monitor_nodes)
+        #monitor_thread.start()
 
     def listen_for_client_requests(self):
         """Actually not just clients, needs another name"""
-        client_request_types = [MessageType.GET, MessageType.PUT, MessageType.DELETE]
         while True:
-            identity, message = self.router_socket.recv_multipart()
-            json_request = json.loads(message)
-            print(json_request)
-            # if (json_request['type'] == MessageType.GET_RESPONSE or json_request['type'] == MessageType.PUT_RESPONSE
-            #         or json_request['type'] == MessageType.REGISTER or json_request['type'] == MessageType.HEARTBEAT_RESPONSE
-            #         or json_request['type'] == MessageType.PUT  # put sent by a client
-            #         or json_request['type'] == MessageType.GET
-            #         or json_request['type'] == MessageType.DELETE):
+            time_left = self.send_state_at - int(time.time() * 1000)
+            if time_left < 0:
+                time_left = 0
+            try:
+                socks = dict(self.poller.poll(time_left))
+            except zmq.error.ZMQError:
+                print("Error")
+                break
+            if socks.get(self.router_socket) == zmq.POLLIN:
+                self.handle_router_message()
+            
+            if socks.get(self.statesub) == zmq.POLLIN:
+                print("Handling state message")
+                self.handle_state_message()
 
-            if json_request['type'] not in client_request_types and json_request['type'] != MessageType.REGISTER:
-                if identity.decode('utf-8') in self.activity:
-                    self.activity[identity.decode('utf-8')]['last_time_active'] = time.time()
-            if json_request['type'] == MessageType.PUT or json_request['type'] == MessageType.GET or json_request['type'] == MessageType.DELETE:
-                print("PUT/GET::Received a new request")
-                json_request['address'] = identity.decode('utf-8')
-                self.heavy_tasks_queue.put(json_request)
-            elif json_request['type'] != MessageType.HEARTBEAT_RESPONSE:
-                self.tasks_queue.put(json_request)
-            continue
+            if int(time.time() * 1000) >= self.send_state_at:
+                print("Sending state message")
+                self.send_state_message()
+
+    def handle_state_message(self):
+        msg = self.statesub.recv()
+        print(msg)
+
+    def send_state_message(self):
+        self.statepub.send_string("%d" % self.fsm.state)
+        self.send_state_at = int(time.time() * 1000) + HEARTBEAT_BSTAR
+            
+
+    def handle_router_message(self):
+        client_request_types = [MessageType.GET, MessageType.PUT, MessageType.DELETE]
+
+        identity, message = self.router_socket.recv_multipart()
+        json_request = json.loads(message)
+        print(json_request)
+
+        if json_request['type'] not in client_request_types and json_request['type'] != MessageType.REGISTER:
+            if identity.decode('utf-8') in self.activity:
+                self.activity[identity.decode('utf-8')]['last_time_active'] = time.time()
+        if json_request['type'] in client_request_types:
+            print("PUT/GET::Received a new request")
+            json_request['address'] = identity.decode('utf-8')
+            self.heavy_tasks_queue.put(json_request)
+        elif json_request['type'] != MessageType.HEARTBEAT_RESPONSE:
+            self.tasks_queue.put(json_request)
 
     def read_data_quorum(self, key):
         primary_node = self.hash_ring.get_node(key)
@@ -603,7 +512,7 @@ def main():
     elif '-b' in sys.argv:
         hash_table = Router(primary=False, address=ROUTER_BACKUP_BIND_ADDRESS, replica_count=24)
     else:
-        print("Usage: bstarsrv2.py { -p | -b }\n")
+        print("Usage: server.py { -p | -b }\n")
         return
     
     hash_table.expose()

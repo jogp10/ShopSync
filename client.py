@@ -12,7 +12,7 @@ import zmq
 
 from shopping_list import ShoppingList
 from crdt import ShoppingListCRDT
-from utils import ROUTER_ADDRESS, ROUTER_BACKUP_ADDRESS, NUM_ROUTERS, MessageType
+from utils import ROUTER_ADDRESS, ROUTER_BACKUP_ADDRESS, MessageType
 
 
 class Client:
@@ -25,7 +25,7 @@ class Client:
         self.socket.setsockopt(zmq.IDENTITY, self.username.encode('utf-8'))
         self.socket.connect(self.routers[self.router_nbr])
         self.shopping_lists = []
-        self.TIMEOUT = 5 #seconds
+        self.TIMEOUT = 10 #seconds
         self.SETTLE_DELAY = 2 #seconds
         
 
@@ -130,6 +130,7 @@ class Client:
                         #reconnect and resend request
                         self.socket.connect(self.routers[self.router_nbr])
                         self.socket.send_json(request, zmq.NOBLOCK)
+                        start_time = time.time()
 
                     #All routers are down
                     else:
