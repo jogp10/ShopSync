@@ -350,8 +350,13 @@ class Router:
         json_request = json.loads(message)
         print(json_request)
 
-        self.fsm.event = CLIENT_REQUEST
+        type_request = json_request['type']
 
+        if type_request == MessageType.REGISTER:
+            self.fsm.event = NODE_REGISTER
+        else:
+            self.fsm.event = CLIENT_REQUEST
+        
         try:
             run_fsm(self.fsm)
 
@@ -511,7 +516,7 @@ def main():
     else:
         print("Usage: server.py { -p | -b }\n")
         return
-    
+
     hash_table.expose()
 
     print(f"Current encoding: {sys.stdin.encoding}")

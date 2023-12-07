@@ -12,6 +12,7 @@ PEER_BACKUP = 2            # HA peer is pending backup
 PEER_ACTIVE = 3            # HA peer is active
 PEER_PASSIVE = 4           # HA peer is passive
 CLIENT_REQUEST = 5         # Client makes request
+NODE_REGISTER = 6          # The only message a passive should receive is a node register
 
 # We send state information every this often
 # If peer doesn't respond in two heartbeats, it is 'dead'
