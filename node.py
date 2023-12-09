@@ -176,14 +176,20 @@ class DynamoNode:
 class Node:
 
     def __init__(self, node_address):
-        router_address = ROUTER_ADDRESS  # todo change if more routers
+        router_addresses = [ROUTER_ADDRESS, ROUTER_BACKUP_ADDRESS]  # todo change if more routers
         # Create a new context and socket for the node
         self.context = zmq.Context()
-        self.node_socket = self.context.socket(zmq.DEALER)
-        self.node_socket.setsockopt(zmq.IDENTITY, node_address.encode('utf-8'))
-        self.node_socket.connect(router_address)
-        # send a first message to the router to register the node
-        self.node_socket.send_json(build_register_request(node_address))
+        self.poller = zmq.Poller()
+        self.node_sockets = [""] * len(router_addresses)
+
+        for i in range(len(router_addresses)):
+            self.node_sockets[i] = self.context.socket(zmq.DEALER)
+            self.node_sockets[i].setsockopt(zmq.IDENTITY, node_address.encode('utf-8'))
+            self.node_sockets[i].connect(router_addresses[i])
+            # send a first message to the router to register the node
+            self.node_sockets[i].send_json(build_register_request(node_address))
+
+            self.poller.register(self.node_sockets[i], zmq.POLLIN)
 
         self.reply_socket = self.context.socket(zmq.PULL)
         self.reply_socket.setsockopt(zmq.IDENTITY, node_address.encode('utf-8'))
@@ -213,43 +219,56 @@ class Node:
 
         # Start listening for messages from the ROUTER
         while True:
-            request = self.node_socket.recv_json()
-            print(request)
+            try:
+                socks = dict(self.poller.poll())
+            except zmq.error.ZMQError:
+                print("Error")
+                break
+
+            for socket in self.node_sockets:
+                if (socks.get(socket) == zmq.POLLIN):
+                    self.handle_server_request(socket)
+            
+            if(socks.get(self.reply_socket) == zmq.POLLIN):
+                self.handle_request(socket)
+
+    def handle_server_request(self, socket):
+
+        request = socket.recv_json()
+        request["origin"] = socket
+        print(request)
 
             # switch case on request type
-            match get_request_type(request):
+        match get_request_type(request):
 
-                case MessageType.COORDINATE_PUT:
-                    self.coordinated_quorums_queue.put(request)
-                    continue
+            case MessageType.COORDINATE_PUT:
+                self.coordinated_quorums_queue.put(request)
+                
+            case MessageType.COORDINATE_GET:
+                self.coordinated_quorums_queue.put(request)
 
-                case MessageType.COORDINATE_GET:
-                    self.coordinated_quorums_queue.put(request)
-                    continue
+            case MessageType.COORDINATE_DELETE:
+                self.coordinated_quorums_queue.put(request)
 
-                case MessageType.COORDINATE_DELETE:
-                    self.coordinated_quorums_queue.put(request)
-                    continue
+            case MessageType.REGISTER_RESPONSE:
+                self.dynamo_node.hash_ring = HashRing([self.node_socket.IDENTITY.decode('utf-8')] + request['nodes'])
 
-                case MessageType.REGISTER_RESPONSE:
-                    self.dynamo_node.hash_ring = HashRing([self.node_socket.IDENTITY.decode('utf-8')] + request['nodes'])
-                    continue
+            case MessageType.ADD_NODE:
+                self.dynamo_node.hash_ring.add_node(request['node'])
 
-                case MessageType.ADD_NODE:
-                    self.dynamo_node.hash_ring.add_node(request['node'])
-                    continue
 
-                case MessageType.REMOVE_NODE:
-                    self.dynamo_node.hash_ring.remove_node(request['node'])
-                    continue
+            case MessageType.REMOVE_NODE:
+                self.dynamo_node.hash_ring.remove_node(request['node'])
 
-                case MessageType.HEARTBEAT:
-                    response = {
-                        "type": MessageType.HEARTBEAT_RESPONSE,
-                        "address": self.node_socket.IDENTITY.decode('utf-8')
-                    }
-                    self.node_socket.send_json(response)
-                    continue
+
+            case MessageType.HEARTBEAT:
+                response = {
+                    "type": MessageType.HEARTBEAT_RESPONSE,
+                    "address": socket.IDENTITY.decode('utf-8')
+                }
+                socket.send_json(response)
+
+
 
     def send_push_message(self, sender_address, receiver_address, message):
         """sender_address comes already encoded"""
@@ -292,7 +311,7 @@ class Node:
                 current_quorum_state['retry_info'][node] += 1
                 current_quorum_state['last_retry_time'][node] = time.time()
 
-                self.send_push_message(self.node_socket.IDENTITY, node,
+                self.send_push_message(self.node_sockets[0].IDENTITY, node,
                                        json.dumps(request))
 
         result = current_quorum_state['responses'].copy()
@@ -386,6 +405,7 @@ class Node:
                         #todo send to primary node sometime or update hashring??
 
                     replicas = self.dynamo_node.hash_ring.get_replica_nodes(primary_node, primary_node_index)
+                    server_socket = task["origin"]
                     request_to_replicas = build_put_request(key, value, quorum_id)
 
                     result = ([self.dynamo_node.write_data(key, ShoppingList.from_dict(json.loads(value)))] +
@@ -401,7 +421,7 @@ class Node:
                     print("Result  after quorum consensus: ", result)
 
                     response_to_router = build_quorum_put_response(quorum_id, result)
-                    self.node_socket.send_json(response_to_router)
+                    server_socket.send_json(response_to_router)
 
                 case MessageType.COORDINATE_GET:
                     quorum_id = task["quorum_id"]
@@ -415,6 +435,7 @@ class Node:
 
                     replicas = self.dynamo_node.hash_ring.get_replica_nodes(primary_node, primary_node_index)
 
+                    server_socket = task["origin"]
                     request_to_replicas = build_get_request(key, quorum_id)
 
                     tmp_result = ([self.dynamo_node.read_data(key)] +
@@ -434,7 +455,7 @@ class Node:
                     print("Result  after quorum consensus: ", result)
 
                     response_to_router = build_quorum_get_response(quorum_id, result)
-                    self.node_socket.send_json(response_to_router)
+                    server_socket.send_json(response_to_router)
 
                 case MessageType.COORDINATE_DELETE:
                     quorum_id = task["quorum_id"]
@@ -462,7 +483,7 @@ class Node:
                         result = True
 
                     response_to_router = build_quorum_delete_response(quorum_id, result)
-                    self.node_socket.send_json(response_to_router)
+                    server_socket.send_json(response_to_router)
 
     def handle_request_response(self, request_type_quorums_state, json_request):
         request_id = json_request['quorum_id']
@@ -488,10 +509,10 @@ class Node:
             "type": message_type + "_RESPONSE",
             "key": key,
             "value": value,
-            "address": self.node_socket.IDENTITY.decode('utf-8'),
+            "address": self.node_sockets[0].IDENTITY.decode('utf-8'),
             "quorum_id": json_request['quorum_id']
         }
-        self.send_push_message(self.node_socket.IDENTITY, sender_identity.decode('utf-8'), json.dumps(response))
+        self.send_push_message(self.node_sockets[0].IDENTITY, sender_identity.decode('utf-8'), json.dumps(response))
 
     def listen_for_nodes(self):
         print("listening for nodes")
