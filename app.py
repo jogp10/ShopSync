@@ -49,6 +49,23 @@ delete_shopping_list_model = api.model('DeleteShoppingListModel', {
     'shopping_list_uuid': fields.String(required=True, description='Uuid of the shopping list')
 })
 
+delete_item_model = api.model('DeleteItemModel', {
+    'shopping_list_uuid': fields.String(required=True, description='Uuid of the shopping list'),
+    'item_name': fields.String(required=True, description='Name of the item')
+})
+
+add_item_model = api.model('AddItemModel', {
+    'shopping_list_uuid': fields.String(required=True, description='Uuid of the shopping list'),
+    'item_name': fields.String(required=True, description='Name of the item'),
+    'item_quantity': fields.Integer(required=False, description='Quantity of the item', default=1)
+})
+
+change_item_quantity_model = api.model('ChangeItemQuantityModel', {
+    'shopping_list_uuid': fields.String(required=True, description='Uuid of the shopping list'),
+    'item_name': fields.String(required=True, description='Name of the item'),
+    'item_quantity': fields.Integer(required=True, description='Quantity of the item')
+})
+
 @shopping_list_ns.route('/create')
 class CreateShoppingList(Resource):
     @api.doc('create_shopping_list')
@@ -60,19 +77,18 @@ class CreateShoppingList(Resource):
         print(f"Received request to create shopping list with name {name} and items {items}")
         shopping_list = client.create_shopping_list(name, items)
         return jsonify({'message': 'Shopping list created successfully', 'shopping_list': shopping_list.serialize()})
-    
-@shopping_list_ns.route('/add_item')
-class AddItemToShoppingList(Resource):
-    @api.doc('add_item_to_shopping_list')
-    @api.expect(shopping_list_model)
+
+@shopping_list_ns.route('/delete')
+class DeleteShoppingList(Resource):
+    @api.doc('delete_shopping_list')
+    @api.expect(delete_shopping_list_model)
     def post(self):
         data = request.json
-        name = data.get('name')
-        item = (data.get('items', [])[0], int(data.get('items', [])[1]))
-        result = client.add_item_to_shopping_list(name, item)
+        uuid = data.get('shopping_list_uuid')
+        result = client.delete_shopping_list(uuid)
         return jsonify({'message': result})
-    
-@shopping_list_ns.route('/list')
+
+@shopping_list_ns.route('/')
 class RetrieveMyShoppingLists(Resource):
     @api.doc('retrieve_my_shopping_lists')
     def get(self):
@@ -85,34 +101,40 @@ class RetrieveItemsOfShoppingList(Resource):
     @api.doc('retrieve_items_of_shopping_list')
     def get(self, shopping_list_uuid):
         shopping_list = next(filter(lambda x: x.id == shopping_list_uuid, client.shopping_lists), None)
-
-        if shopping_list is not None:
-            items = shopping_list.items
-        else:
-            items = None
-
         return shopping_list.serialize()
     
-@shopping_list_ns.route('/delete')
-class DeleteShoppingList(Resource):
-    @api.doc('delete_shopping_list')
-    @api.expect(delete_shopping_list_model)
+@shopping_list_ns.route('/item/add')
+class AddItemToShoppingList(Resource):
+    @api.doc('add_item_to_shopping_list')
+    @api.expect(add_item_model)
     def post(self):
         data = request.json
         uuid = data.get('shopping_list_uuid')
-        result = client.delete_shopping_list(uuid)
-        return jsonify({'message': result})
+        item = (data.get('item_name'), int(data.get('item_quantity', 1)))
+        result = client.add_item_to_shopping_list(uuid, item)
+        return result.serialize()
     
-@shopping_list_ns.route('/delete_item')
+@shopping_list_ns.route('/item/delete')
 class DeleteItemFromShoppingList(Resource):
     @api.doc('delete_item_from_shopping_list')
-    @api.expect({'shopping_list_name': fields.String(required=True, description='Name of the shopping list')})
+    @api.expect(delete_item_model)
     def post(self):
         data = request.json
-        name = data.get('name')
-        item = (data.get('items', [])[0], int(data.get('items', [])[1]))
-        result = client.delete_item_from_shopping_list(name, item)
-        return jsonify({'message': result})
+        uuid = data.get('shopping_list_uuid')
+        item = (data.get('item_name'), 'default_item')
+        result = client.delete_item_from_shopping_list(uuid, item)
+        return result.serialize()
+
+@shopping_list_ns.route('/item/change')
+class ChangeItemQuantityInShoppingList(Resource):
+    @api.doc('change_item_quantity_in_shopping_list')
+    @api.expect(change_item_quantity_model)
+    def post(self):
+        data = request.json
+        uuid = data.get('shopping_list_uuid')
+        item = (data.get('item_name', 'default_item'), int(data.get('item_quantity', 0)))
+        result = client.change_item_quantity(uuid, item)
+        return result.serialize()
     
 @shopping_list_ns.route('/sync')
 class SyncShoppingList(Resource):

@@ -233,6 +233,39 @@ class Client:
         else:
             print("Shopping list deletion in server failed (deleted locally)")
             return False
+        
+    def add_item_to_shopping_list(self, list_id, item):
+        shopping_list = next(filter(lambda x: x.id == list_id, self.shopping_lists), None)
+
+        if shopping_list is None:
+            print("Shopping list does not exist")
+            return False
+
+        shopping_list.add_item(item, self.username)
+
+        return shopping_list
+    
+    def delete_item_from_shopping_list(self, list_id, item):
+        shopping_list = next(filter(lambda x: x.id == list_id, self.shopping_lists), None)
+
+        if shopping_list is None:
+            print("Shopping list does not exist")
+            return False
+
+        shopping_list.remove_item(item)
+
+        return shopping_list
+    
+    def change_item_quantity(self, list_id, item):
+        shopping_list = next(filter(lambda x: x.id == list_id, self.shopping_lists), None)
+
+        if shopping_list is None:
+            print("Shopping list does not exist")
+            return False
+
+        shopping_list.change_item_quantity(item, self.username)
+
+        return shopping_list
 
 def ask_for_items():
     items = []
