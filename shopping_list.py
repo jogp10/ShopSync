@@ -74,3 +74,11 @@ class ShoppingList:
         print(f"Items in {self.name}:")
         for item in self.items.counters:
             print(f"{item}: {self.items.value(item)}")
+
+    def serialize(self):
+        if len(self.items.counters) == 0:
+            return {'name': self.name, 'items': []}
+
+        serialized_items = [{'item': item, 'quantity': self.items.value(item)} for item in self.items.counters]
+
+        return {'id': self.id, 'name': self.name, 'items': serialized_items}
