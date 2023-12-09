@@ -13,7 +13,8 @@ TIMEOUT_THRESHOLD = 500
 MONITOR_INTERVAL = 30
 MIN_TIME_BETWEEN_RETRIES = 1
 HEALTH_CHECK_TIMEOUT = 0.15
-
+COORDINATOR_HEALTH_CHECK_TIMEOUT = 0.3
+REPLICA_COUNT = 24
 
 class MessageType(StrEnum):
     GET = 'GET'
@@ -36,6 +37,8 @@ class MessageType(StrEnum):
     HINTED_HANDOFF_RESPONSE = 'HINTED_HANDOFF_RESPONSE'
     HEALTH_CHECK = 'HEALTH_CHECK'
     HEALTH_CHECK_RESPONSE = 'HEALTH_CHECK_RESPONSE'
+    ADD_NODE = 'ADD_NODE'
+    REMOVE_NODE = 'REMOVE_NODE'
 
 
 def build_get_request(key, quorum_id=''):
@@ -47,13 +50,12 @@ def build_get_request(key, quorum_id=''):
     }
 
 
-def build_quorum_get_request(key, quorum_id, replicas=[]):
+def build_quorum_get_request(key, quorum_id):
     """given a key, return a json for a get request of that key"""
     return {
         "type": MessageType.COORDINATE_GET,
         "key": key,
         "quorum_id": quorum_id,
-        "replicas": replicas  # todo remove once nodes have their own hashring
     }
 
 
@@ -67,14 +69,13 @@ def build_put_request(key, value, quorum_id=''):
     }
 
 
-def build_quorum_put_request(key, value, quorum_id, replicas=[]):
+def build_quorum_put_request(key, value, quorum_id):
     """given a key and a value, return a json for a put request of that key and value"""
     return {
         "type": MessageType.COORDINATE_PUT,
         "key": key,
         "value": value,
         "quorum_id": quorum_id,
-        "replicas": replicas  # todo remove once nodes have their own hashring
     }
 
 
@@ -114,12 +115,11 @@ def build_delete_request(key, quorum_id=''):
     }
 
 
-def build_quorum_delete_request(key, quorum_id, replicas=[]):
+def build_quorum_delete_request(key, quorum_id):
     return {
         "type": MessageType.COORDINATE_DELETE,
         "key": key,
         "quorum_id": quorum_id,
-        "replicas": replicas  # todo remove once nodes have their own hashring
     }
 
 
@@ -149,12 +149,28 @@ def build_register_request(address):
         "address": address
     }
 
-def build_register_response(message):
+def build_register_response(nodes):
     """given an address, return a json for a register request of that address"""
     return {
         "type": MessageType.REGISTER_RESPONSE,
-        "message": message
+        "nodes": nodes
     }
+
+def build_add_node_request(node):
+    """given an node, return a json for a register request of that node"""
+    return {
+        "type": MessageType.ADD_NODE,
+        "node": node
+    }
+
+def build_remove_node_request(node):
+    """given an address, return a json for a register request of that address"""
+    return {
+        "type": MessageType.REMOVE_NODE,
+        "node": node
+    }
+
+
 
 def build_heartbeat_request():
     """return a json for a heartbeat request"""
@@ -193,4 +209,7 @@ def get_most_common_value(values):
 def valid_heartbeat(node_activity):
     return time.time() - node_activity['last_time_active'] < TIMEOUT_THRESHOLD
 
+
+def valid_health_check(node_activity):
+    return node_activity['immediately_available']
 

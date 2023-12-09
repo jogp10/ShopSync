@@ -1,5 +1,4 @@
 # Start of server.py
-import hashlib
 import json
 import queue
 import sys
@@ -8,90 +7,9 @@ import matplotlib.pyplot as plt
 
 import zmq
 import threading
+
+from hash_ring import HashRing
 from utils import *
-
-
-class HashRing:
-    def __init__(self, nodes, replica_count):
-        self.ring = {}
-        self.replica_count = replica_count
-        self.sorted_keys = []
-        self.generate_ring(nodes)
-
-    def generate_ring(self, nodes):
-        for node in nodes:
-            for i in range(self.replica_count):
-                key = self.get_node_key(node, i)
-                self.ring[key] = node
-                self.sorted_keys.append(key)
-
-        self.sorted_keys.sort()
-
-        # print(self.sorted_keys)
-        # print(self.ring)
-
-    def get_node(self, string_key):
-        """Given a string key a corresponding node in the hash ring is returned.
-        If the hash ring is empty, `None` is returned.
-        """
-        pos = self.get_node_pos(string_key)
-        return self.ring[self.sorted_keys[pos]]
-
-    def get_node_key(self, node, replica_index):
-        return hashlib.sha256(f"{node}-{replica_index}".encode()).hexdigest()
-
-    def get_node_pos(self, key):
-        hash_key = self.hash_key(key)
-        for i, ring_key in enumerate(self.sorted_keys):
-            if hash_key <= ring_key:
-                return i
-
-        # If the hash is greater than all keys, loop back to the first node
-        return 0
-
-    def get_replica_nodes(self, primary_node):
-        if not self.ring:
-            return []
-
-        primary_index = self.sorted_keys.index(self.get_node_key(primary_node, 0))
-        # skip the primary node
-        i = 0
-        j = 0
-        replica_indices = []
-        index = primary_index - 1
-        while j < len(self.sorted_keys) and i < N:
-            # get the node at the next index, clockwise
-            next_node = self.ring[self.sorted_keys[index]]
-            if next_node != primary_node:
-                replica_indices.append(index)
-                i += 1
-            index = (index + 1) % len(self.sorted_keys)
-            j += 1
-
-        return [self.ring[self.sorted_keys[i]] for i in replica_indices]
-
-    def hash_key(self, key):
-        return hashlib.sha256(key.encode()).hexdigest()
-
-    def add_node(self, node):
-        # TODO probably more to do here
-        for i in range(self.replica_count):
-            key = self.get_node_key(node, i)
-            self.ring[key] = node
-            self.sorted_keys.append(key)
-
-        self.sorted_keys.sort()
-
-    def remove_node(self, node):
-        for i in range(self.replica_count):
-            key = self.get_node_key(node, i)
-            del self.ring[key]
-            self.sorted_keys.remove(key)
-
-    def print_ring(self):
-        print("Hash Ring:")
-        for key in self.sorted_keys:
-            print(f"{key}: {self.ring[key]}")
 
 
 class Router:
@@ -123,14 +41,20 @@ class Router:
         self.router_socket.bind(router_address)
 
     def add_node(self, node_address):
-        print(f"Adding node {node_address}")
+        print(f"Adding node {node_address}\n")
+        for node in self.nodes:
+            self.router_socket.send_multipart([node.encode('utf-8'),
+                                               json.dumps(build_add_node_request(node_address)).encode('utf-8')])
         self.hash_ring.add_node(node_address)
         self.activity[node_address] = {}
         self.activity[node_address]['last_time_active'] = time.time()
+        self.activity[node_address]['immediately_available'] = False
         self.nodes.append(node_address)
-        print(self.nodes)
 
     def remove_node(self, node_address):
+        for node in self.nodes:
+            self.router_socket.send_multipart([node.encode('utf-8'),
+                                               json.dumps(build_remove_node_request(node_address)).encode('utf-8')])
         self.activity.pop(node_address)
         self.nodes.remove(node_address)
         self.hash_ring.remove_node(node_address)
@@ -152,11 +76,11 @@ class Router:
             match get_request_type(task):
 
                 case MessageType.REGISTER:
-                    print("REGISTER::Received a new node", task['address'])
+                    previous_nodes = self.nodes.copy()
                     self.add_node(task['address'])
-                    # send a response to the node
+                    # send a response to the node, include the current nodes to configure the hashring
                     self.router_socket.send_multipart([task['address'].encode('utf-8'),
-                                                       json.dumps(build_register_response("ok")).encode('utf-8')])
+                                                       json.dumps(build_register_response(previous_nodes)).encode('utf-8')])
                     continue
 
                 case MessageType.COORDINATE_PUT_RESPONSE:
@@ -173,7 +97,6 @@ class Router:
                         del self.forwarded_write_quorums[request_id]
                     else:
                         print("COORDINATE_PUT_RESPONSE::Received a response for a request that was already processed")
-                        print(task)
                         continue
 
                 case MessageType.COORDINATE_DELETE_RESPONSE:
@@ -190,7 +113,6 @@ class Router:
                         del self.forwarded_delete_quorums[request_id]
                     else:
                         print("COORDINATE_PUT_RESPONSE::Received a response for a request that was already processed")
-                        print(task)
                         continue
 
                 case MessageType.COORDINATE_GET_RESPONSE:
@@ -207,7 +129,6 @@ class Router:
                         del self.forwarded_read_quorums[request_id]
                     else:
                         print("COORDINATE_PUT_RESPONSE::Received a response for a request that was already processed")
-                        print(task)
                         continue
 
     def process_heavy_tasks(self, tasks_queue):
@@ -261,14 +182,14 @@ class Router:
 
         heavy_tasks_thread.start()
 
-        main_thread = threading.Thread(target=self.listen_for_client_requests)
+        main_thread = threading.Thread(target=self.listen_for_requests)
         main_thread.start()
 
         monitor_thread = threading.Thread(target=self.monitor_nodes)
         monitor_thread.start()
 
-    def listen_for_client_requests(self):
-        """Actually not just clients, needs another name"""
+    def listen_for_requests(self):
+        """From clients and server nodes"""
         client_request_types = [MessageType.GET, MessageType.PUT, MessageType.DELETE]
         while True:
             identity, message = self.router_socket.recv_multipart()
@@ -278,6 +199,9 @@ class Router:
             if json_request['type'] not in client_request_types and json_request['type'] != MessageType.REGISTER:
                 if identity.decode('utf-8') in self.activity:
                     self.activity[identity.decode('utf-8')]['last_time_active'] = time.time()
+                    self.activity[identity.decode('utf-8')]['immediately_available'] = True
+                else:
+                    print("Received a request from an unknown node", identity.decode('utf-8'), file=sys.stderr)
             if json_request['type'] == MessageType.PUT or json_request['type'] == MessageType.GET or json_request[
                 'type'] == MessageType.DELETE:
                 print("PUT/GET::Received a new request: ", json_request)
@@ -334,27 +258,24 @@ class Router:
     def send_delete_request_to_nodes(self, request, nodes, timeout, max_retries, quorum_size):
         return self.send_request_to_nodes(MessageType.DELETE, request, nodes, timeout, max_retries, quorum_size)
 
-    def route(self, list_id: str):
-        return self.hash_ring.get_node(list_id)
-
     def _process_request(self, key, value, client_address, request_type):
-        primary_node = self.hash_ring.get_node(key)
-        replicas = self.hash_ring.get_replica_nodes(primary_node)
+        primary_node, pos = self.hash_ring.get_node(key)
+        replicas = self.hash_ring.get_replica_nodes(primary_node, pos)
         coordinator = self.elect_coordinator(primary_node, replicas)
 
         if coordinator is None:
-            # todo scream
-            pass
+            # todo ?
+            print("Coordinator is None", file=sys.stderr)
+            return
 
         quorum_id = str(uuid4())
         forwarded_quorums = self._get_forwarded_quorums(request_type)
         forwarded_quorums[quorum_id] = {node: 0 for node in [primary_node] + replicas}
         forwarded_quorums[quorum_id][coordinator] += 1
         forwarded_quorums[quorum_id]['client_address'] = client_address
+        # todo error checking here
 
-        other_nodes = [node for node in [primary_node] + replicas if node != coordinator]
-
-        request = self._build_request(request_type, key, value, quorum_id, other_nodes)
+        request = self._build_request(request_type, key, value, quorum_id)
         print("Sending request to coordinator: ", request, coordinator)
         self.router_socket.send_multipart([coordinator.encode('utf-8'), json.dumps(request).encode('utf-8')])
 
@@ -375,20 +296,39 @@ class Router:
         elif request_type == MessageType.DELETE:
             return self.forwarded_delete_quorums
 
-    def _build_request(self, request_type, key, value, quorum_id, other_nodes):
+    def _build_request(self, request_type, key, value, quorum_id):
         if request_type == MessageType.GET:
-            return build_quorum_get_request(key, quorum_id, other_nodes)
+            return build_quorum_get_request(key, quorum_id)
         elif request_type == MessageType.PUT:
-            return build_quorum_put_request(key, value, quorum_id, other_nodes)
+            return build_quorum_put_request(key, value, quorum_id)
         elif request_type == MessageType.DELETE:
-            return build_quorum_delete_request(key, quorum_id, other_nodes)
+            return build_quorum_delete_request(key, quorum_id)
 
     def elect_coordinator(self, primary_node, replicas):
+        # send an heartbeat to all nodes
+        nodes_to_probe = [primary_node] + list(set(replicas))
+        print("\nNodes to probe: ", nodes_to_probe, "\n")
+        for node in nodes_to_probe:
+            self.activity[node]['immediately_available'] = False
+            self.router_socket.send_multipart([node.encode('utf-8'), json.dumps(build_heartbeat_request()).encode('utf-8')])
         coordinator = None
-        for node in [primary_node] + replicas:
-            if node in self.activity and valid_heartbeat(self.activity[node]):
-                coordinator = node
-                break
+
+        start_time = time.time()
+        while time.time() - start_time < COORDINATOR_HEALTH_CHECK_TIMEOUT:
+            for node in nodes_to_probe:
+                if node in self.activity and valid_health_check(self.activity[node]):
+                    coordinator = node
+                    break
+
+        if coordinator != primary_node:
+            print("Coordinator is not the primary node", coordinator)
+        #     check again if the primary node is alive
+            if valid_health_check(self.activity[primary_node]):
+                coordinator = primary_node
+                print("ACTUALLY... Coordinator is the primary node")
+
+        for node in nodes_to_probe:
+            self.activity[node]['immediately_available'] = False
         return coordinator
 
 
@@ -425,7 +365,7 @@ def main():
         "tcp://localhost:5557",
         "tcp://localhost:5558",
     ]
-    hash_table = Router(replica_count=24)
+    hash_table = Router(replica_count=REPLICA_COUNT)
     hash_table.expose()
 
     print(f"Current encoding: {sys.stdin.encoding}")

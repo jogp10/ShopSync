@@ -2,8 +2,6 @@ import json
 import queue
 import sys
 import threading
-import time
-from typing import Dict
 import os
 import sqlite3
 import atexit
@@ -11,6 +9,7 @@ import atexit
 import zmq
 
 from crdt import ShoppingListCRDT, upsert_list
+from hash_ring import HashRing
 from shopping_list import ShoppingList
 from utils import *
 
@@ -24,6 +23,8 @@ class DynamoNode:
         self.read_quorum_requests_state = {}
         self.write_quorum_requests_state = {}
         self.delete_quorum_requests_state = {}
+
+        self.hash_ring: HashRing = HashRing()
 
         for key in data.keys():
             self.dirty[key] = False
@@ -231,7 +232,15 @@ class Node:
                     continue
 
                 case MessageType.REGISTER_RESPONSE:
-                    # print(request)
+                    self.dynamo_node.hash_ring = HashRing([self.node_socket.IDENTITY.decode('utf-8')] + request['nodes'])
+                    continue
+
+                case MessageType.ADD_NODE:
+                    self.dynamo_node.hash_ring.add_node(request['node'])
+                    continue
+
+                case MessageType.REMOVE_NODE:
+                    self.dynamo_node.hash_ring.remove_node(request['node'])
                     continue
 
                 case MessageType.HEARTBEAT:
@@ -251,8 +260,6 @@ class Node:
         push_socket.close()
 
     def send_request_to_other_nodes(self, request_type, request, nodes, timeout, max_retries, quorum_size):
-
-        healthy, unhealthy = self.check_nodes_health(nodes)
 
         quorum_id = request['quorum_id']
         quorum_size = min(quorum_size, len(set(nodes)))
@@ -372,14 +379,21 @@ class Node:
                     quorum_id = task["quorum_id"]
                     key = task["key"]
                     value = task["value"]
+                    primary_node, primary_node_index = self.dynamo_node.hash_ring.get_node(key)
+
+                    if primary_node != self.node_socket.IDENTITY.decode('utf-8'):
+                        print("I am not the primary node for this key", file=sys.stderr)
+                        #todo send to primary node sometime or update hashring??
+
+                    replicas = self.dynamo_node.hash_ring.get_replica_nodes(primary_node, primary_node_index)
                     request_to_replicas = build_put_request(key, value, quorum_id)
 
                     result = ([self.dynamo_node.write_data(key, ShoppingList.from_dict(json.loads(value)))] +
-                              self.send_put_request_to_other_nodes(request_to_replicas, task['replicas'], 5, 1,
+                              self.send_put_request_to_other_nodes(request_to_replicas, replicas, 5, 1,
                                                                    W_QUORUM))
 
                     print(result)
-                    quorum_size = min(W_QUORUM, len(set(task['replicas'])) + 1)
+                    quorum_size = min(W_QUORUM, len(set(replicas)) + 1)
                     if len(result) < quorum_size:
                         result = False
                     else:
@@ -392,16 +406,25 @@ class Node:
                 case MessageType.COORDINATE_GET:
                     quorum_id = task["quorum_id"]
                     key = task["key"]
+
+                    primary_node, primary_node_index = self.dynamo_node.hash_ring.get_node(key)
+
+                    if primary_node != self.node_socket.IDENTITY.decode('utf-8'):
+                        print("I am not the primary node for this key", file=sys.stderr)
+                        # todo send to primary node sometime or update hashring??
+
+                    replicas = self.dynamo_node.hash_ring.get_replica_nodes(primary_node, primary_node_index)
+
                     request_to_replicas = build_get_request(key, quorum_id)
 
                     tmp_result = ([self.dynamo_node.read_data(key)] +
-                              self.send_get_request_to_other_nodes(request_to_replicas, task['replicas'], 5, 1,
+                              self.send_get_request_to_other_nodes(request_to_replicas, replicas, 5, 1,
                                                                    R_QUORUM))
 
                     print(tmp_result)
                     # exclude Nones from the list
                     result = [item for item in tmp_result if item is not None]
-                    quorum_size = min(R_QUORUM, len(set(task['replicas'])) + 1)
+                    quorum_size = min(R_QUORUM, len(set(replicas)) + 1)
                     if len(result) < quorum_size:
                         result = False
                     else:
@@ -416,14 +439,23 @@ class Node:
                 case MessageType.COORDINATE_DELETE:
                     quorum_id = task["quorum_id"]
                     key = task["key"]
+
+                    primary_node, primary_node_index = self.dynamo_node.hash_ring.get_node(key)
+
+                    if primary_node != self.node_socket.IDENTITY.decode('utf-8'):
+                        print("I am not the primary node for this key", file=sys.stderr)
+                        # todo send to primary node sometime or update hashring??
+
+                    replicas = self.dynamo_node.hash_ring.get_replica_nodes(primary_node, primary_node_index)
+
                     request_to_replicas = build_delete_request(key, quorum_id)
 
                     result = ([self.dynamo_node.delete_data(key)] +
-                              self.send_delete_request_to_other_nodes(request_to_replicas, task['replicas'], 5, 1,
+                              self.send_delete_request_to_other_nodes(request_to_replicas, replicas, 5, 1,
                                                                       R_QUORUM))
 
                     print(result)
-                    quorum_size = min(R_QUORUM, len(set(task['replicas'])) + 1)
+                    quorum_size = min(R_QUORUM, len(set(replicas)) + 1)
                     if len(result) < quorum_size:
                         result = False
                     else:

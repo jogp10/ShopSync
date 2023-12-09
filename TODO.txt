@@ -1,10 +1,8 @@
 NOTA: há mais todos pelo código que não estão aqui
 
 HIGH:
-- cada node deve ter o seu hashring e haver gossip entre eles para atualizar os hashrings?
-- gossip / hinted handoff
+- hinted handoff
 - hinted handoff implica suspender nodes antes de os remover?
-- mais q 1 router???
 
 MEDIUM:
 - fazer merge nos writes?
