@@ -1,5 +1,8 @@
 NOTA: há mais todos pelo código que não estão aqui
 
+
+- é sempre node_sockets[0] no node.py??
+
 HIGH:
 - hinted handoff
 - hinted handoff implica suspender nodes antes de os remover?

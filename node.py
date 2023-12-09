@@ -176,7 +176,7 @@ class DynamoNode:
 class Node:
 
     def __init__(self, node_address):
-        router_addresses = [ROUTER_ADDRESS, ROUTER_BACKUP_ADDRESS]  # todo change if more routers
+        router_addresses = [ROUTER_ADDRESS, ROUTER_BACKUP_ADDRESS]
         # Create a new context and socket for the node
         self.context = zmq.Context()
         self.poller = zmq.Poller()
@@ -251,7 +251,7 @@ class Node:
                 self.coordinated_quorums_queue.put(request)
 
             case MessageType.REGISTER_RESPONSE:
-                self.dynamo_node.hash_ring = HashRing([self.node_socket.IDENTITY.decode('utf-8')] + request['nodes'])
+                self.dynamo_node.hash_ring = HashRing([self.node_sockets[0].IDENTITY.decode('utf-8')] + request['nodes'])
 
             case MessageType.ADD_NODE:
                 self.dynamo_node.hash_ring.add_node(request['node'])
@@ -335,7 +335,7 @@ class Node:
     def check_nodes_health(self, nodes):
         nodes_set = set(nodes)
         for node in nodes_set:
-            self.send_push_message(self.node_socket.IDENTITY, node, json.dumps({"type": MessageType.HEALTH_CHECK}))
+            self.send_push_message(self.node_sockets[0].IDENTITY, node, json.dumps({"type": MessageType.HEALTH_CHECK}))
 
         start_time = time.time()
         all_ok = False
@@ -365,8 +365,8 @@ class Node:
         # Send a HEALTH_CHECK message
         push_socket = self.context.socket(zmq.PUSH)
         push_socket.connect(node_address)
-        print([self.node_socket.IDENTITY, json.dumps(message).encode('utf-8')])
-        push_socket.send_multipart([self.node_socket.IDENTITY, json.dumps(message).encode('utf-8')])
+        print([self.node_sockets[0].IDENTITY, json.dumps(message).encode('utf-8')])
+        push_socket.send_multipart([self.node_sockets[0].IDENTITY, json.dumps(message).encode('utf-8')])
         push_socket.close()
 
         start_time = time.time()
@@ -400,7 +400,7 @@ class Node:
                     value = task["value"]
                     primary_node, primary_node_index = self.dynamo_node.hash_ring.get_node(key)
 
-                    if primary_node != self.node_socket.IDENTITY.decode('utf-8'):
+                    if primary_node != self.node_sockets[0].IDENTITY.decode('utf-8'):
                         print("I am not the primary node for this key", file=sys.stderr)
                         #todo send to primary node sometime or update hashring??
 
@@ -429,7 +429,7 @@ class Node:
 
                     primary_node, primary_node_index = self.dynamo_node.hash_ring.get_node(key)
 
-                    if primary_node != self.node_socket.IDENTITY.decode('utf-8'):
+                    if primary_node != self.node_sockets[0].IDENTITY.decode('utf-8'):
                         print("I am not the primary node for this key", file=sys.stderr)
                         # todo send to primary node sometime or update hashring??
 
@@ -463,7 +463,7 @@ class Node:
 
                     primary_node, primary_node_index = self.dynamo_node.hash_ring.get_node(key)
 
-                    if primary_node != self.node_socket.IDENTITY.decode('utf-8'):
+                    if primary_node != self.node_sockets[0].IDENTITY.decode('utf-8'):
                         print("I am not the primary node for this key", file=sys.stderr)
                         # todo send to primary node sometime or update hashring??
 
@@ -556,7 +556,7 @@ class Node:
                 case MessageType.HEALTH_CHECK:
                     # If a HEALTH_CHECK message is received, send a HEALTH_CHECK_RESPONSE message
                     response = {"type": MessageType.HEALTH_CHECK_RESPONSE}
-                    self.send_push_message(self.node_socket.IDENTITY, sender_identity.decode('utf-8'),
+                    self.send_push_message(self.node_sockets[0].IDENTITY, sender_identity.decode('utf-8'),
                                            json.dumps(response))
                     continue
 

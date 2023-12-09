@@ -46,10 +46,7 @@ class Router:
         self.activity = {}  # for heartbeats and potentially other things
         self.hash_ring = HashRing(nodes, replica_count)
         self.tasks_queue = queue.Queue()
-        self.heavy_tasks_queue = queue.Queue()  # todo ter os nós a coordenar os quorums evita esta queue
-        self.read_quorum_requests_state = {}
-        # self.write_quorum_requests_state = {}
-        self.delete_quorum_requests_state = {}
+        self.heavy_tasks_queue = queue.Queue()
 
         # states of the quorums that have been forwarded to the nodes
         self.forwarded_read_quorums = {}  # a dictionary of quorum_id -> dictionary of node -> number of tries
@@ -228,7 +225,7 @@ class Router:
         monitor_thread = threading.Thread(target=self.monitor_nodes)
         monitor_thread.start()
 
-    def listen_for_client_requests(self):
+    def listen_for_requests(self):
         """From clients and server nodes"""
         while True:
             time_left = self.send_state_at - int(time.time() * 1000)
@@ -296,54 +293,6 @@ class Router:
         except BStarException:
             pass
 
-
-
-    def send_request_to_nodes(self, type, request, nodes, timeout, max_retries, quorum_size):
-        quorum_id = request['quorum_id']
-        if type == MessageType.GET:
-            self.read_quorum_requests_state[quorum_id] = build_quorum_request_state(nodes, timeout, max_retries,
-                                                                                    quorum_size)
-            current_quorum_state = self.read_quorum_requests_state[quorum_id]
-        # elif type == MessageType.PUT:
-        #     self.write_quorum_requests_state[quorum_id] = build_quorum_request_state(nodes, timeout, max_retries,
-        #                                                                              quorum_size)
-        #     current_quorum_state = self.write_quorum_requests_state[quorum_id]
-        elif type == MessageType.DELETE:
-            self.delete_quorum_requests_state[quorum_id] = build_quorum_request_state(nodes, timeout, max_retries,
-                                                                                      quorum_size)
-            current_quorum_state = self.delete_quorum_requests_state[quorum_id]
-
-        start_time = time.time()
-        # TODO should the condition be the length of the most common response?
-        while time.time() - start_time < timeout and len(current_quorum_state['responses']) < quorum_size:
-            for node in nodes:
-                if not any([current_quorum_state['retry_info'][node] <= max_retries for node in nodes]):
-                    continue
-                if node in current_quorum_state['nodes_with_reply']:
-                    continue
-                if current_quorum_state['retry_info'][node] > max_retries:
-                    continue
-                current_quorum_state['retry_info'][node] += 1
-
-                self.router_socket.send_multipart([node.encode('utf-8'), json.dumps(request).encode('utf-8')])
-
-        result = current_quorum_state['responses'].copy()
-        if type == MessageType.GET:
-            del self.read_quorum_requests_state[quorum_id]
-        # elif type == MessageType.PUT:
-        #     del self.write_quorum_requests_state[quorum_id]
-        elif type == MessageType.DELETE:
-            del self.delete_quorum_requests_state[quorum_id]
-        return result
-
-    def send_get_request_to_nodes(self, request, nodes, timeout, max_retries, quorum_size):
-        return self.send_request_to_nodes(MessageType.GET, request, nodes, timeout, max_retries, quorum_size)
-
-    def send_put_request_to_nodes(self, request, nodes, timeout, max_retries, quorum_size):
-        return self.send_request_to_nodes(MessageType.PUT, request, nodes, timeout, max_retries, quorum_size)
-
-    def send_delete_request_to_nodes(self, request, nodes, timeout, max_retries, quorum_size):
-        return self.send_request_to_nodes(MessageType.DELETE, request, nodes, timeout, max_retries, quorum_size)
 
     def _process_request(self, key, value, client_address, request_type):
         primary_node, pos = self.hash_ring.get_node(key)
