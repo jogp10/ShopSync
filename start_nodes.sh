@@ -9,11 +9,11 @@ fi
 # Loop through each port number provided as arguments
 for port in "$@"; do
     # Start python node.py with the specified port in a new terminal
-    gnome-terminal -- python3 node.py "$port" &
+    gnome-terminal -- python3.11 node.py "$port" &
 done
 
 # Sleep to allow time for nodes to start (adjust as needed)
 sleep 5
 
 # Run server.py in a new terminal
-gnome-terminal -- python3 server.py
+gnome-terminal -- python3.11 server.py

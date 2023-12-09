@@ -37,13 +37,22 @@ shopping_list_model = api.model('ShoppingListInput', {
     'items': fields.List(fields.Raw(example=["item1", 5]), description='List of items in the shopping list')
 })
 
+sync_shopping_list_model = api.model('SyncShoppingListModel', {
+    'shopping_list_uuid': fields.String(required=True, description='Uuid of the shopping list')
+})
+
+store_shopping_list_model = api.model('StoreShoppingListModel', {
+    'shopping_list_uuid': fields.String(required=True, description='Uuid of the shopping list')
+})
+
+delete_shopping_list_model = api.model('DeleteShoppingListModel', {
+    'shopping_list_uuid': fields.String(required=True, description='Uuid of the shopping list')
+})
+
 @shopping_list_ns.route('/create')
 class CreateShoppingList(Resource):
     @api.doc('create_shopping_list')
-    @api.expect(api.model('ShoppingListInput', {
-        'name': fields.String(required=True, description='Name of the shopping list'),
-        'items': fields.List(fields.Raw(example=["item1", 5]), description='List of items in the shopping list')
-    }))
+    @api.expect(shopping_list_model)
     def post(self):
         data = request.json
         name = data.get('name')
@@ -67,26 +76,31 @@ class AddItemToShoppingList(Resource):
 class RetrieveMyShoppingLists(Resource):
     @api.doc('retrieve_my_shopping_lists')
     def get(self):
-        shopping_lists = show_available_lists(client)
+        shopping_lists = client.shopping_lists
         serialized_lists = [shopping_list.serialize() for shopping_list in shopping_lists]
         return jsonify({'shopping_lists': serialized_lists})
 
-@shopping_list_ns.route('/<string:shopping_list_name>')
+@shopping_list_ns.route('/<string:shopping_list_uuid>')
 class RetrieveItemsOfShoppingList(Resource):
     @api.doc('retrieve_items_of_shopping_list')
-    @api.expect({'shopping_list_name': fields.String(required=True, description='Name of the shopping list')})
-    def get(self, shopping_list_name):
-        items = client.shopping_lists(shopping_list_name)
-        return jsonify({'items': items})
+    def get(self, shopping_list_uuid):
+        shopping_list = next(filter(lambda x: x.id == shopping_list_uuid, client.shopping_lists), None)
+
+        if shopping_list is not None:
+            items = shopping_list.items
+        else:
+            items = None
+
+        return shopping_list.serialize()
     
 @shopping_list_ns.route('/delete')
 class DeleteShoppingList(Resource):
     @api.doc('delete_shopping_list')
-    @api.expect({'shopping_list_name': fields.String(required=True, description='Name of the shopping list')})
+    @api.expect(delete_shopping_list_model)
     def post(self):
         data = request.json
-        name = data.get('name')
-        result = client.delete_shopping_list(name)
+        uuid = data.get('shopping_list_uuid')
+        result = client.delete_shopping_list(uuid)
         return jsonify({'message': result})
     
 @shopping_list_ns.route('/delete_item')
@@ -103,35 +117,35 @@ class DeleteItemFromShoppingList(Resource):
 @shopping_list_ns.route('/sync')
 class SyncShoppingList(Resource):
     @api.doc('sync_shopping_list')
-    @api.expect({'shopping_list_name': fields.String(required=True, description='Name of the shopping list')})
+    @api.expect(store_shopping_list_model)
     def post(self):
         data = request.json
-        name = data.get('name')
-        result = client.sync_shopping_list(name)
+        uuid = data.get('shopping_list_uuid')
+        result = client.store_shopping_list_online(uuid)
         return jsonify({'message': result})
     
 @shopping_list_ns.route('/sync_all')
 class SyncAllShoppingLists(Resource):
     @api.doc('sync_all_shopping_lists')
     def post(self):
-        result = client.sync_all_shopping_lists()
+        result = client.store_shopping_lists_online()
         return jsonify({'message': result})
     
 @shopping_list_ns.route('/load')
 class LoadShoppingList(Resource):
     @api.doc('load_shopping_list')
-    @api.expect({'shopping_list_name': fields.String(required=True, description='Name of the shopping list')})
+    @api.expect(sync_shopping_list_model)
     def post(self):
         data = request.json
-        name = data.get('name')
-        result = client.load_shopping_list(name)
+        uuid = data.get('shopping_list_uuid')
+        result = client.fetch_shopping_list(uuid)
         return jsonify({'message': result})
     
 @shopping_list_ns.route('/load_all')
 class LoadAllShoppingLists(Resource):
     @api.doc('load_all_shopping_lists')
     def post(self):
-        result = client.load_all_shopping_lists()
+        result = client.fetch_shopping_lists()
         return jsonify({'message': result})
 
 

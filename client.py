@@ -151,7 +151,9 @@ class Client:
 
         return response
 
-    def store_shopping_list_online(self, shopping_list: ShoppingList):
+    def store_shopping_list_online(self, list_id):
+        shopping_list = next(filter(lambda x: x.id == list_id, self.shopping_lists), None)
+
         request = {
             "type": MessageType.PUT,
             "key": shopping_list.id,
@@ -162,8 +164,17 @@ class Client:
 
         if response:
             print("Shopping list stored successfully")
+            return True
         else:
             print("Shopping list storage failed")
+            return False
+
+    def store_shopping_lists_online(self):
+        result = True
+        for shopping_list in self.shopping_lists:
+            if not self.store_shopping_list_online(shopping_list.id):
+                result = False
+        return result
 
     def fetch_shopping_list(self, list_id):
         request = {
@@ -191,8 +202,18 @@ class Client:
                 self.shopping_lists.append(shopping_list_fetched)
                 print(f"Shopping list {shopping_list_fetched.name} added successfully!\n")
 
+            return True
+
         else:
             print("Shopping list fetch failed")
+            return False
+
+    def fetch_shopping_lists(self):
+        result = True
+        for shopping_list in self.shopping_lists:
+            if not self.fetch_shopping_list(shopping_list.id):
+                result = False
+        return result
 
 
     def delete_shopping_list(self, list_id):
@@ -201,12 +222,17 @@ class Client:
             "key": list_id
         }
 
+        shopping_list = next(filter(lambda x: x.id == list_id, self.shopping_lists), None)
+
+        self.shopping_lists.remove(shopping_list)
         response = self.send_message_to_router(request)
 
         if response:
             print("Shopping list deleted successfully")
+            return True
         else:
             print("Shopping list deletion in server failed (deleted locally)")
+            return False
 
 def ask_for_items():
     items = []
@@ -355,7 +381,7 @@ if __name__ == "__main__":
 
             list_index = get_int_from_user("Enter the number of the shopping list to sync to the cloud: ", min, max) - 1
             shopping_list: ShoppingList = client.shopping_lists[list_index]
-            client.store_shopping_list_online(shopping_list)
+            client.store_shopping_list_online(shopping_list.id)
 
         elif choice == '7':
             list_id = input("Enter the id of the shopping list to load from the cloud: ")
@@ -371,9 +397,6 @@ if __name__ == "__main__":
                                            max) - 1
             shopping_list: ShoppingList = client.shopping_lists[list_index]
 
-            # delete locally, this will alter the database in the exit
-            client.shopping_lists.remove(shopping_list)
-
             client.delete_shopping_list(shopping_list.id)
 
             print(f'Shopping list deleted: {shopping_list.name}')
@@ -388,13 +411,13 @@ if __name__ == "__main__":
             # Store all shopping lists to cloud
             for shopping_list in client.shopping_lists:
                 print("Stroring shopping list " + shopping_list.name + " to cloud...")
-                client.store_shopping_list_online(shopping_list)
+                client.store_shopping_list_online(shopping_list.id)
 
         elif choice == '11':
             # Store all shopping lists to cloud
             for shopping_list in client.shopping_lists:
                 print("Stroring shopping list " + shopping_list.name + " to cloud...")
-                client.store_shopping_list_online(shopping_list)
+                client.store_shopping_list_online(shopping_list.id)
 
             print("Goodbye!")
             break
