@@ -251,6 +251,7 @@ class Node:
                             self.send_push_message(self.node_sockets[0].IDENTITY, node,
                                                    json.dumps(build_put_handed_off_request(key,
                                                    json.dumps(self.dynamo_node.read_data(key), default=lambda x: x.__dict__))))
+                            self.delete_list_if_not_owned(key)
 
                 for node in self.delete_hints.keys():
                     if self.delete_hints.get(node, None) in healthy:
@@ -288,12 +289,23 @@ class Node:
             case MessageType.ADD_NODE:
                 new_node = request['node']
                 self.dynamo_node.hash_ring.add_node(new_node)
+
+                # check if any lists are stored in this node that should be handed off
+                for key in self.dynamo_node.data.keys():
+                    if self.check_if_owned(key, new_node):
+                        self.send_push_message(self.node_sockets[0].IDENTITY, new_node,
+                                               json.dumps(build_put_handed_off_request(key,
+                                               json.dumps(self.dynamo_node.read_data(key), default=lambda x: x.__dict__))))
+
+                    self.delete_list_if_not_owned(key)
+
                 healthy, _ = self.check_nodes_health(self.dynamo_node.hash_ring.get_other_nodes(self.address))
                 if self.write_hints.get(new_node, None) in healthy:
                     for key in self.write_hints[new_node]:
                         self.send_push_message(self.node_sockets[0].IDENTITY, new_node,
                                                json.dumps(build_put_handed_off_request(key,
                                                json.dumps(self.dynamo_node.read_data(key), default=lambda x: x.__dict__))))
+                        self.delete_list_if_not_owned(key)
 
                 if self.delete_hints.get(new_node, None) in healthy:
                     for key in self.delete_hints[new_node]:
@@ -306,6 +318,9 @@ class Node:
             #     remove from hints if present
                 self.write_hints.pop(request['node'], None)
                 self.delete_hints.pop(request['node'], None)
+
+            #     delete any nodes from this dynamo node that are not owned
+        # TODO when a node is deleted each node can be entitle to more lists, is this feasible?
 
             case MessageType.HEARTBEAT:
                 response = {
@@ -420,8 +435,6 @@ class Node:
                     return False
                 else:
                     continue
-
-        # TODO: Implement hinted handoff and mark node as suspended
 
         print(f"Node {node_address} is healthy.")
 
@@ -667,6 +680,19 @@ class Node:
 
     def get_unhealthy_nodes(self, nodes):
         return [node for node in nodes if not self.nodes_health.get(node, False)]
+
+    def delete_list_if_not_owned(self, key):
+        primary_node, primary_node_pos = self.dynamo_node.hash_ring.get_node(key)
+        replicas = self.dynamo_node.hash_ring.get_ideal_replica_nodes(primary_node, primary_node_pos)
+        if self.address not in replicas:
+            self.dynamo_node.delete_data(key)
+
+    def check_if_owned(self, key, node=None):
+        if node is None:
+            node = self.address
+        primary_node, primary_node_pos = self.dynamo_node.hash_ring.get_node(key)
+        replicas = self.dynamo_node.hash_ring.get_ideal_replica_nodes(primary_node, primary_node_pos)
+        return node in replicas
 
 
 

@@ -53,8 +53,6 @@ class HashRing:
     def get_replica_nodes(self, primary_node, primary_node_position, unhealthy_nodes=[]):
         if not self.ring:
             return []
-
-
         # skip the primary node
         i = 0  # number of nodes found
         j = 0  # number of nodes checked
@@ -92,6 +90,26 @@ class HashRing:
 
         return [self.ring[self.sorted_keys[i]] for i in replica_indices], failed_nodes, substitute_nodes
 
+    def get_ideal_replica_nodes(self, primary_node, primary_node_position):
+        """Do not consider failed nodes and add the primary node to the list"""
+        if not self.ring:
+            return []
+
+        # skip the primary node
+        i = 0
+        j = 0
+        replica_indices = []
+        index = (primary_node_position + 1) % len(self.sorted_keys)
+        while j < len(self.sorted_keys) and i < N:
+            # get the node at the next index, clockwise
+            next_node = self.ring[self.sorted_keys[index]]
+            if next_node != primary_node:
+                replica_indices.append(index)
+                i += 1
+            index = (index + 1) % len(self.sorted_keys)
+            j += 1
+
+        return [self.ring[self.sorted_keys[i]] for i in replica_indices] + [primary_node]
     def hash_key(self, key):
         return hashlib.sha256(key.encode()).hexdigest()
 

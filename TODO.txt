@@ -4,7 +4,7 @@ NOTA: há mais todos pelo código que não estão aqui
 - é sempre node_sockets[0] no node.py??
 
 HIGH:
-- rebalance when adding new nodes, partilha de listas
+- rebalance when adding new nodes, partilha de listas -- meio feito
 
 MEDIUM:
 - fazer merge nos writes?
