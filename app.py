@@ -12,7 +12,6 @@ CORS(app) # Enable cors for all routes
 from client import Client, show_available_lists, ShoppingListStorageError
 from utils import ROUTER_ADDRESS, ROUTER_BACKUP_ADDRESS
 
-PORT_RANGE = range(5000, 5050)  # Adjust the range as needed
 def find_available_port():
     for port in PORT_RANGE:
         with socket.socket(socket.AF_INET, socket.SOCK_STREAM) as s:
@@ -20,13 +19,20 @@ def find_available_port():
                 return port
     raise Exception("No available ports in the specified range.")
 
+def get_username_from_port(port):
+    return f"User_{port}"
 
 # Initialize your client
-server_addresses = [ROUTER_ADDRESS, ROUTER_BACKUP_ADDRESS]
-client_address = f"tcp://localhost:{find_available_port()}"
-client = Client(server_addresses, client_address)
-client.get_database_data()
+PORT_RANGE = range(5000, 5050)  # Adjust the range as needed
+port = find_available_port()
+client_address = f"tcp://localhost:{port}"
 
+server_addresses = [ROUTER_ADDRESS, ROUTER_BACKUP_ADDRESS]
+
+username = get_username_from_port(port)
+client = Client(server_addresses, client_address)
+
+client.get_database_data()
 #ensure that at exit always do a local save
 atexit.register(client.save_database_data)
 
@@ -200,5 +206,4 @@ class LoadAllShoppingLists(Resource):
 # Implement other API endpoints similarly...
 
 if __name__ == '__main__':
-    port = find_available_port()
-    app.run(port=port, debug=True, use_reloader=True)
+    app.run(port=port, debug=False, use_reloader=False)
