@@ -473,13 +473,13 @@ if __name__ == "__main__":
         elif choice == '10':
             # Store all shopping lists to cloud
             for shopping_list in client.shopping_lists:
-                print("Stroring shopping list " + shopping_list.name + " to cloud...")
+                print("Storing shopping list " + shopping_list.name + " to cloud...")
                 client.store_shopping_list_online(shopping_list.id)
 
         elif choice == '11':
             # Store all shopping lists to cloud
             for shopping_list in client.shopping_lists:
-                print("Stroring shopping list " + shopping_list.name + " to cloud...")
+                print("Storing shopping list " + shopping_list.name + " to cloud...")
                 client.store_shopping_list_online(shopping_list.id)
 
             print("Goodbye!")

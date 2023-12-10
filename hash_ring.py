@@ -1,4 +1,5 @@
 import hashlib
+import sys
 
 from utils import REPLICA_COUNT, N
 
@@ -83,7 +84,6 @@ class HashRing:
                     if next_node not in unhealthy_nodes:
                         replica_indices.append(index)
                         substitute_nodes.append(next_node)
-
                     i += 1
                 index = (index + 1) % len(self.sorted_keys)
                 j += 1

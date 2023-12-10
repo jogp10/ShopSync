@@ -12,12 +12,14 @@ NUM_ROUTERS = 2
 R_QUORUM = 2
 W_QUORUM = 3
 N = 4
-TIMEOUT_THRESHOLD = 45
-MONITOR_INTERVAL = 38
+TIMEOUT_THRESHOLD = 60
+MONITOR_INTERVAL = 25
 MIN_TIME_BETWEEN_RETRIES = 1
 HEALTH_CHECK_TIMEOUT = 0.15
 COORDINATOR_HEALTH_CHECK_TIMEOUT = 0.3
 REPLICA_COUNT = 24
+NULL_QUORUM_ID = 'NULL_QUORUM_ID'
+HINT_CHECK_INTERVAL = 10
 
 class MessageType(StrEnum):
     GET = 'GET'
@@ -50,6 +52,7 @@ class MessageType(StrEnum):
     PUT_HANDED_OFF_RESPONSE = 'PUT_HANDED_OFF_RESPONSE'
     DELETE_HANDED_OFF = 'DELETE_HANDED_OFF'
     DELETE_HANDED_OFF_RESPONSE = 'DELETE_HANDED_OFF_RESPONSE'
+
 
 
 def build_get_request(key, quorum_id=''):
@@ -248,3 +251,10 @@ def valid_heartbeat(node_activity):
 def valid_health_check(node_activity):
     return node_activity['immediately_available']
 
+
+def get_default_error_response(request_type):
+    match request_type:
+        case MessageType.GET, MessageType.DELETE:
+            return None
+        case MessageType.PUT:
+            return False

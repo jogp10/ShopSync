@@ -50,8 +50,6 @@ class Router:
         self.forwarded_read_quorums = {}  # a dictionary of quorum_id -> dictionary of node -> number of tries
         self.forwarded_write_quorums = {}  # a dictionary of quorum_id -> dictionary of node -> number of tries
         self.forwarded_delete_quorums = {}  # a dictionary of quorum_id -> dictionary of node -> number of tries
-        # todo maybe store which nodes are busy at the moment
-
 
         #ROUTER ATTR
         self.statepub = self._context.socket(zmq.PUB)
@@ -74,6 +72,8 @@ class Router:
 
 
     def add_node(self, node_address):
+        if node_address in self.nodes:
+            return
         print(f"Adding node {node_address}\n")
         for node in self.nodes:
             self.router_socket.send_multipart([node.encode('utf-8'),
@@ -275,7 +275,6 @@ class Router:
             run_fsm(self.fsm)
 
             if json_request['type'] not in client_request_types and json_request['type'] != MessageType.REGISTER:
-                print(self.activity)
                 if identity.decode('utf-8') in self.activity:
                     self.activity[identity.decode('utf-8')]['last_time_active'] = time.time()
                     self.activity[identity.decode('utf-8')]['immediately_available'] = True
@@ -298,8 +297,10 @@ class Router:
         coordinator = self.elect_coordinator(primary_node, replicas)
 
         if coordinator is None:
-            # todo ?
             print("Coordinator is None", file=sys.stderr)
+            if coordinator is None:
+                self.router_socket.send_multipart(
+                    [client_address.encode('utf-8'), json.dumps(get_default_error_response(request_type)).encode('utf-8')])
             return
 
         quorum_id = str(uuid4())
@@ -307,11 +308,12 @@ class Router:
         forwarded_quorums[quorum_id] = {node: 0 for node in [primary_node] + replicas}
         forwarded_quorums[quorum_id][coordinator] += 1
         forwarded_quorums[quorum_id]['client_address'] = client_address
-        # todo error checking here
 
         request = self._build_request(request_type, key, value, quorum_id)
         print("Sending request to coordinator: ", request, coordinator)
         self.router_socket.send_multipart([coordinator.encode('utf-8'), json.dumps(request).encode('utf-8')])
+
+
 
     def get(self, key, client_address):
         self._process_request(key, None, client_address, MessageType.GET)
