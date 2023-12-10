@@ -412,8 +412,8 @@ def main():
     # change to latin-1
     sys.stdin = open(sys.stdin.fileno(), mode='r', encoding='latin-1', buffering=True)
 
-    if input('Test the hash ring? (y/n) ').lower() == 'y':
-        hash_ring_testing(hash_table)
+    # if input('Test the hash ring? (y/n) ').lower() == 'y':
+    #     hash_ring_testing(hash_table)
 
 
 if __name__ == "__main__":

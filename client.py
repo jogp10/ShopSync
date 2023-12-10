@@ -194,8 +194,6 @@ class Client:
         }
 
         response = self.send_message_to_router(request)
-        print("testeresponse: ", file=sys.stderr)
-        print(response, file=sys.stderr)
 
         if response:
             print("Shopping list fetched successfully")
@@ -221,7 +219,7 @@ class Client:
 
         else:
             print("Shopping list fetch failed", file=sys.stderr)
-            if response == False:
+            if not response:
                 raise ShoppingListNotFoundError("Shopping list not yet on cloud")
             raise ShoppingListStorageError("Failed to connect to the router for shopping list fetch.")
 
@@ -442,11 +440,19 @@ if __name__ == "__main__":
 
             list_index = get_int_from_user("Enter the number of the shopping list to sync to the cloud: ", min, max) - 1
             shopping_list: ShoppingList = client.shopping_lists[list_index]
-            client.store_shopping_list_online(shopping_list.id)
+            try:
+                client.store_shopping_list_online(shopping_list.id)
+            except ShoppingListStorageError as e:
+                print(e)
 
         elif choice == '7':
             list_id = input("Enter the id of the shopping list to load from the cloud: ")
-            client.fetch_shopping_list(list_id)
+            try:
+                client.fetch_shopping_list(list_id)
+            except ShoppingListStorageError as e:
+                print(e)
+            except ShoppingListNotFoundError as e:
+                print(e)
 
         elif choice == '8':
             (min, max) = show_available_lists(client)
@@ -466,19 +472,30 @@ if __name__ == "__main__":
             # Load all shopping lists from cloud
             for shopping_list in client.shopping_lists:
                 print("Loading shopping list " + shopping_list.name + " from cloud...")
-                client.fetch_shopping_list(shopping_list.id)
+                try:
+                    client.fetch_shopping_list(shopping_list.id)
+                except ShoppingListStorageError as e:
+                    print(e)
+                except ShoppingListNotFoundError as e:
+                    print(e)
 
         elif choice == '10':
             # Store all shopping lists to cloud
             for shopping_list in client.shopping_lists:
                 print("Storing shopping list " + shopping_list.name + " to cloud...")
-                client.store_shopping_list_online(shopping_list.id)
+                try:
+                    client.store_shopping_list_online(shopping_list.id)
+                except ShoppingListStorageError as e:
+                    print(e)
 
         elif choice == '11':
             # Store all shopping lists to cloud
             for shopping_list in client.shopping_lists:
                 print("Storing shopping list " + shopping_list.name + " to cloud...")
-                client.store_shopping_list_online(shopping_list.id)
+                try:
+                    client.store_shopping_list_online(shopping_list.id)
+                except ShoppingListStorageError as e:
+                    print(e)
 
             print("Goodbye!")
             break
