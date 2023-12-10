@@ -14,6 +14,13 @@ from shopping_list import ShoppingList
 from crdt import ShoppingListCRDT
 from utils import ROUTER_ADDRESS, ROUTER_BACKUP_ADDRESS, MessageType
 
+class ShoppingListStorageError(Exception):
+    pass
+
+class ShoppingListNotFoundError(Exception):
+    pass
+
+
 
 class Client:
     def __init__(self, server_addresses: list[str], username):
@@ -154,6 +161,10 @@ class Client:
     def store_shopping_list_online(self, list_id):
         shopping_list = next(filter(lambda x: x.id == list_id, self.shopping_lists), None)
 
+        if shopping_list is None:
+            print("Shopping list not found")
+            raise ShoppingListNotFoundError("Shopping list not found")
+
         request = {
             "type": MessageType.PUT,
             "key": shopping_list.id,
@@ -167,13 +178,18 @@ class Client:
             return True
         else:
             print("Shopping list storage failed")
-            return False
-
+            raise ShoppingListStorageError("Failed to connect to the router for shopping list storage.")
+            
     def store_shopping_lists_online(self):
         result = True
         for shopping_list in self.shopping_lists:
-            if not self.store_shopping_list_online(shopping_list.id):
+            try:
+                self.store_shopping_list_online(shopping_list.id)
+            except ShoppingListStorageError as e:
+                raise e
+            except ShoppingListNotFoundError as e:
                 result = False
+                pass
         return result
 
     def fetch_shopping_list(self, list_id):
@@ -206,7 +222,7 @@ class Client:
 
         else:
             print("Shopping list fetch failed")
-            return False
+            raise ShoppingListStorageError("Failed to connect to the router for shopping list fetch.")
 
     def fetch_shopping_lists(self):
         result = True

@@ -1,16 +1,34 @@
+<div class="content-block">
+  <h2>{{ list_title }}</h2>
 
-<h2 class="content-block">{{ list_title }}</h2>
+  <div class="btn-group">
+    <button class="btn btn-primary" (click)="loadShoppingList()" [disabled]="loading">
+      Sync with Cloud
+    </button>
 
-<dx-data-grid class="dx-card wide-card"
-  [dataSource]="dataSource"
-  keyExpr="item"
-  [showBorders]="false"
-  [focusedRowEnabled]="true"
-  [columnAutoWidth]="true"
-  [columnHidingEnabled]="true"
-  [editing]="{ mode: 'cell', allowUpdating: true, allowAdding: true, allowDeleting: true, texts: { confirmDeleteMessage: 'Are you sure you want to delete this item?' } }"
-  (onRowUpdated)="onRowUpdated($event)"
-  (onRowInserted)="onRowInserted($event)"
+    <button class="btn btn-primary" (click)="storeShoppingList()" [disabled]="loading">
+      Save to Cloud
+    </button>
+
+    <!-- Loading indicator -->
+    <div *ngIf="loading" class="loading-container">
+      <div class="loading-indicator">
+        <i class="fas fa-spinner fa-spin"></i>
+      </div>
+    </div>
+  </div>
+</div>
+
+
+
+<dx-data-grid class="dx-card wide-card" [dataSource]="dataSource" keyExpr="item" [showBorders]="false"
+  [focusedRowEnabled]="true" [columnAutoWidth]="true" [columnHidingEnabled]="true" [editing]="{
+    mode: 'cell',
+    allowUpdating: true,
+    allowAdding: true,
+    allowDeleting: true,
+    texts: { confirmDeleteMessage: 'Are you sure you want to delete this item?' }
+  }" (onRowUpdated)="onRowUpdated($event)" (onRowInserted)="onRowInserted($event)"
   (onRowRemoved)="onRowRemoved($event)">
 
   <dxo-paging [pageSize]="10"></dxo-paging>
@@ -18,19 +36,9 @@
   <dxo-filter-row [visible]="true"></dxo-filter-row>
 
   <!-- Dynamically generate columns based on dataSource -->
-  <ng-container *ngFor="let column of dataSource; let i = index">
-    <dxi-column
-      [dataField]="column.item"
-      [width]="200"
-      [caption]="column.item"
-      [hidingPriority]="i + 1">
-    </dxi-column>
-    <dxi-column
-      dataField="quantity"
-      caption="Quantity"
-      [width]="100"
-      [hidingPriority]="i + 2"
-      [allowEditing]="true">
+  <ng-container *ngFor="let column of columns; let i = index">
+    <dxi-column [dataField]="column" [caption]="column | titlecase" [width]="column === 'quantity' ? 100 : 800"
+      [allowEditing]="true" [hidingPriority]="i + 1">
     </dxi-column>
   </ng-container>
 </dx-data-grid>

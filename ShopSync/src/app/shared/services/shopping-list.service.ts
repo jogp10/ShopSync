@@ -69,7 +69,7 @@ export class ShoppingListService {
   }
 
   getShoppingListsFromCloud(): Observable<any> {
-    return this.http.get<any>(`${this.apiUrl}load_all`);
+    return this.http.post<any>(`${this.apiUrl}load_all`, {});
   }
 
   storeShoppingListToCloud(shoppingListUuid: string): Observable<any> {
@@ -81,7 +81,7 @@ export class ShoppingListService {
   }
 
   storeShoppingListsToCloud(): Observable<any> {
-    return this.http.get<any>(`${this.apiUrl}sync_all`);
+    return this.http.post<any>(`${this.apiUrl}sync_all`, {});
   }
 
   deleteShoppingList(shoppingListUuid: string): Observable<any> {

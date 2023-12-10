@@ -7,6 +7,7 @@ import { AuthService, ScreenService, AppInfoService } from './shared/services';
 import { UnauthenticatedContentModule } from './unauthenticated-content';
 import { AppRoutingModule } from './app-routing.module';
 import { DxDataGridModule } from 'devextreme-angular';
+import { CommonModule } from '@angular/common';
 
 @NgModule({
   declarations: [
@@ -24,7 +25,8 @@ import { DxDataGridModule } from 'devextreme-angular';
     LoginFormModule,
     UnauthenticatedContentModule,
     AppRoutingModule,
-    DxDataGridModule
+    DxDataGridModule,
+    CommonModule
   ],
   providers: [
     AuthService,

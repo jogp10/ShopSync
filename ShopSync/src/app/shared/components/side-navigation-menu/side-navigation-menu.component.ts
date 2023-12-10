@@ -2,6 +2,7 @@ import { Component, NgModule, Output, Input, EventEmitter, ViewChild, ElementRef
 import { DxTreeViewModule, DxTreeViewComponent, DxTreeViewTypes } from 'devextreme-angular/ui/tree-view';
 import * as events from 'devextreme/events';
 import { ShoppingListService } from '../../services/shopping-list.service';
+import notify from 'devextreme/ui/notify';
 
 @Component({
   selector: 'app-side-navigation-menu',
@@ -80,7 +81,7 @@ export class SideNavigationMenuComponent implements AfterViewInit, OnDestroy {
   private getItems(data: any): any[] {
     console.log('data', data);
     this.menuItems = data;
-  
+
     // Add a new item for creating a list
     const createList = {
       text: 'Create New List',
@@ -91,7 +92,39 @@ export class SideNavigationMenuComponent implements AfterViewInit, OnDestroy {
         console.log('Create New List');
       },
     };
-  
+
+    // Add items for loading and syncing all lists
+    const loadAllLists = {
+      text: 'Sync Lists',
+      icon: 'download',
+      onClick: () => {
+        // Handle the click event to load all lists
+        this.syncAllLists();
+      },
+    };
+
+    const syncAllLists = {
+      text: 'Save Lists',
+      icon: 'upload',
+      onClick: () => {
+        // Handle the click event to sync all lists
+        this.storeAllLists();
+      },
+    };
+
+    const deleteList = (item: any) => ({
+      text: 'Delete',
+      icon: 'trash',
+      onClick: () => {
+        // Show a confirmation message
+        if (confirm(`Are you sure you want to delete the list "${item.text}"?`)) {
+          // Handle the click event to delete the list
+          console.log(`Delete List: ${item.text}`);
+          this.shoppingListService.deleteShoppingList(''); // Adjust this based on your service
+        }
+      },
+    });
+
     return [
       {
         text: 'Home',
@@ -105,11 +138,46 @@ export class SideNavigationMenuComponent implements AfterViewInit, OnDestroy {
           ...this.menuItems.map((menuItem: any) => ({
             text: menuItem.name,
             path: '/tasks/' + menuItem.id,
-          })),
-          createList, // Include the "Create New List" item
+            items: [
+              deleteList(menuItem), // Include the delete button for each list item
+            ],
+          }))
         ],
       },
+      {
+        text: 'Manage Lists',
+        icon: 'preferences',
+        items: [
+          createList, // Include the create list button
+          loadAllLists, // Include the load all lists button
+          syncAllLists, // Include the sync all lists button
+        ],
+      }
     ];
+  }
+
+  syncAllLists() {
+    this.shoppingListService.getShoppingListsFromCloud().subscribe({
+      next: (success: any) => {
+        notify('Shopping lists synced with cloud', 'success', 2000);
+      },
+      error: (error: any) => {
+        notify('Error syncing shopping lists', 'error', 2000);
+        console.error('Error storing shopping lists', error);
+      },
+    });
+  }
+
+  storeAllLists() {
+    this.shoppingListService.storeShoppingListsToCloud().subscribe({
+      next: (success: any) => {
+        notify('Shopping lists stored in cloud', 'success', 2000);
+      },
+      error: (error: any) => {
+        notify('Error storing shopping lists', 'error', 2000);
+        console.error('Error storing shopping lists', error);
+      },
+    });
   }
 
   ngAfterViewInit() {

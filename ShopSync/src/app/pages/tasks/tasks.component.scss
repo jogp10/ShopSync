@@ -1,0 +1,24 @@
+.loading-container {
+  width: 100%;
+  z-index: 100;
+  display: flex;
+  justify-content: center;
+  align-items: center;
+  position: fixed;
+  top: 0;
+  left: 0;
+  height: 100vh;
+  background: rgba(255, 255, 255, 0.8);
+  /* Adjust background color and opacity */
+}
+
+.loading-indicator {
+  font-size: 24px;
+  color: #333;
+  /* Adjust color */
+}
+
+.dx-card.wide-card {
+  width: 100%;
+  /* Make the dx-data-grid take full width of its parent */
+}

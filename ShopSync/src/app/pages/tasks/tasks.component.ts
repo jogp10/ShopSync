@@ -1,16 +1,19 @@
 import { Component, OnInit } from '@angular/core';
 import { Router, ActivatedRoute } from '@angular/router';
+import notify from 'devextreme/ui/notify';
 import { ShoppingListService } from 'src/app/shared/services/shopping-list.service';
 
 @Component({
   selector: 'app-tasks',
   templateUrl: './tasks.component.html',
-  // styleUrls: ['./tasks.component.scss']
+  styleUrls: ['./tasks.component.scss']
 })
 export class TasksComponent implements OnInit {
   dataSource: any[] = [];
   list_title: string = '';
   list_id: string = '';
+  loading: boolean = false;
+  columns: any[] = ['item', 'quantity'];
 
   constructor(private router: Router, private route: ActivatedRoute, private shoppingListService: ShoppingListService) {}
 
@@ -30,16 +33,13 @@ export class TasksComponent implements OnInit {
 
   generateDataSource(shoppingList: any) {
     // Assuming your shoppingList has an 'items' array
-    this.dataSource = shoppingList.items.map((item: any) => {
-      if (item.quantity == 0) {
-        return null;
-      }
-      return {
+    this.dataSource = shoppingList.items
+      .filter((item: any) => item.quantity !== 0)
+      .map((item: any) => ({
         item: item.item,
         quantity: item.quantity,
-      };
-    });
-  }
+      }));
+  }  
 
   onCellClick(event: any) {
     // Check if the clicked cell is in the "Quantity" column
@@ -62,8 +62,7 @@ export class TasksComponent implements OnInit {
         this.generateDataSource(data);
       },
       error: (error: any) => {
-        console.error('API call failed', error);
-        // Handle errors as needed
+        notify('Error updating item', 'error', 2000);
       },
     });
 
@@ -86,8 +85,7 @@ export class TasksComponent implements OnInit {
         this.generateDataSource(data);
       },
       error: (error: any) => {
-        console.error('API call failed', error);
-        // Handle errors as needed
+        notify('Error adding item', 'error', 2000);
       },
     });
   }
@@ -105,8 +103,7 @@ export class TasksComponent implements OnInit {
         this.generateDataSource(data);
       },
       error: (error: any) => {
-        console.error('API call failed', error);
-        // Handle errors as needed
+        notify('Error deleting item', 'error', 2000);
       },
     });
   }
@@ -114,24 +111,37 @@ export class TasksComponent implements OnInit {
   loadShoppingList() {
     // Implement logic to load shopping list from the cloud
     console.log('Load Shopping List clicked');
+    this.loading = true;
 
     this.shoppingListService.getShoppingListFromCloud(this.list_id).subscribe({
       next: (data: any) => {
-        console.log('data', data);
+        notify('Shopping list loaded from cloud', 'success', 2000);
         this.generateDataSource(data);
+        this.loading = false;
       },
+
+      error: (error: any) => {
+        notify('Error loading shopping list from cloud', 'error', 2000);
+        this.loading = false;
+      }
     });
   }
   
   storeShoppingList() {
     // Implement logic to store shopping list in the cloud
     console.log('Store Shopping List clicked');
+    this.loading = true;
 
     this.shoppingListService.storeShoppingListToCloud(this.list_id).subscribe({
       next: (data: any) => {
-        console.log('data', data);
-        this.generateDataSource(data);
+        notify('Shopping list stored in cloud', 'success', 2000);
+        this.loading = false;
       },
+
+      error: (error: any) => {
+        notify('Error storing shopping list in cloud', 'error', 2000);
+        this.loading = false;
+      }
     });
   }
 }

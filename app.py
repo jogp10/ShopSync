@@ -1,4 +1,4 @@
-from flask import Flask, jsonify, request
+from flask import Flask, abort, jsonify, request
 from flask_restx import Resource, Api, fields
 from flask_cors import CORS
 import socket
@@ -9,7 +9,7 @@ api = Api(app)
 CORS(app) # Enable cors for all routes
 
 # Replace these import statements with your actual class definitions
-from client import Client, show_available_lists
+from client import Client, show_available_lists, ShoppingListStorageError
 from utils import ROUTER_ADDRESS, ROUTER_BACKUP_ADDRESS
 
 PORT_RANGE = range(5000, 5050)  # Adjust the range as needed
@@ -153,15 +153,23 @@ class SyncShoppingList(Resource):
     def post(self):
         data = request.json
         uuid = data.get('shopping_list_uuid')
-        result = client.store_shopping_list_online(uuid)
-        return jsonify({'message': result})
+        
+        try:
+            result = client.store_shopping_list_online(uuid)
+            return jsonify({'message': result})
+        except ShoppingListStorageError as e:
+            abort(503, description="Failed to connect to the server. Service temporarily unavailable.")
+
     
 @shopping_list_ns.route('/sync_all')
 class SyncAllShoppingLists(Resource):
     @api.doc('sync_all_shopping_lists')
     def post(self):
-        result = client.store_shopping_lists_online()
-        return jsonify({'message': result})
+        try:
+            result = client.store_shopping_lists_online()
+            return jsonify({'message': result})
+        except ShoppingListStorageError as e:
+            abort(503, description="Failed to connect to the server. Service temporarily unavailable.")
     
 @shopping_list_ns.route('/load')
 class LoadShoppingList(Resource):
@@ -170,19 +178,23 @@ class LoadShoppingList(Resource):
     def post(self):
         data = request.json
         uuid = data.get('shopping_list_uuid')
-        result = client.fetch_shopping_list(uuid)
-        return result.serialize()
+
+        try:
+            result = client.fetch_shopping_list(uuid)
+            return result.serialize()
+        except ShoppingListStorageError as e:
+            abort(503, description="Failed to connect to the server. Service temporarily unavailable.")
     
 @shopping_list_ns.route('/load_all')
 class LoadAllShoppingLists(Resource):
     @api.doc('load_all_shopping_lists')
     def post(self):
-        result = client.fetch_shopping_lists()
-        if result is False:
-            return jsonify({'message': 'Could not load shopping lists'})
-        serialized_lists = [shopping_list.serialize() for shopping_list in result]
-        return jsonify(serialized_lists)
-
+        try:
+            result = client.fetch_shopping_lists()
+            serialized_lists = [shopping_list.serialize() for shopping_list in result]
+            return jsonify(serialized_lists)
+        except ShoppingListStorageError as e:
+            abort(503, description="Failed to connect to the server. Service temporarily unavailable.")
 
 # Implement other API endpoints similarly...
 
