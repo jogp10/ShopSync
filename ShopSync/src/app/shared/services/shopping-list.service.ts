@@ -50,5 +50,44 @@ export class ShoppingListService {
   
     return this.http.post<any>(`${this.apiUrl}item/delete`, data);
   }
+
+  getShoppingListFromCloud(shoppingListUuid: string): Observable<any> {
+    const data = {
+      shopping_list_uuid: shoppingListUuid,
+    };
   
+    return this.http.post<any>(`${this.apiUrl}load`, data);
+  }
+
+  getShoppingListsFromCloud(): Observable<any> {
+    return this.http.get<any>(`${this.apiUrl}load_all`);
+  }
+
+  storeShoppingListToCloud(shoppingListUuid: string): Observable<any> {
+    const data = {
+      shopping_list_uuid: shoppingListUuid,
+    };
+  
+    return this.http.post<any>(`${this.apiUrl}sync`, data);
+  }
+
+  storeShoppingListsToCloud(): Observable<any> {
+    return this.http.get<any>(`${this.apiUrl}sync_all`);
+  }
+
+  deleteShoppingList(shoppingListUuid: string): Observable<any> {
+    const data = {
+      shopping_list_uuid: shoppingListUuid,
+    };
+  
+    return this.http.post<any>(`${this.apiUrl}delete`, data);
+  }
+
+  createShoppingList(shoppingListName: string): Observable<any> {
+    const data = {
+      shopping_list_name: shoppingListName,
+    };
+  
+    return this.http.post<any>(`${this.apiUrl}create`, data);
+  }
 }

@@ -34,8 +34,8 @@ atexit.register(client.save_database_data)
 shopping_list_ns = api.namespace('shopping_list', description='Shopping List Operations')
 
 # Define a model for the input data
-shopping_list_model = api.model('ShoppingListInput', {
-    'name': fields.String(required=True, description='Name of the shopping list'),
+create_shopping_list_model = api.model('CreateShoppingListModel', {
+    'shopping_list_name': fields.String(required=True, description='Name of the shopping list'),
     'items': fields.List(fields.Raw(example=["item1", 5]), description='List of items in the shopping list')
 })
 
@@ -71,7 +71,7 @@ change_item_quantity_model = api.model('ChangeItemQuantityModel', {
 @shopping_list_ns.route('/create')
 class CreateShoppingList(Resource):
     @api.doc('create_shopping_list')
-    @api.expect(shopping_list_model)
+    @api.expect(create_shopping_list_model)
     def post(self):
         data = request.json
         name = data.get('name')
@@ -171,14 +171,17 @@ class LoadShoppingList(Resource):
         data = request.json
         uuid = data.get('shopping_list_uuid')
         result = client.fetch_shopping_list(uuid)
-        return jsonify({'message': result})
+        return result.serialize()
     
 @shopping_list_ns.route('/load_all')
 class LoadAllShoppingLists(Resource):
     @api.doc('load_all_shopping_lists')
     def post(self):
         result = client.fetch_shopping_lists()
-        return jsonify({'message': result})
+        if result is False:
+            return jsonify({'message': 'Could not load shopping lists'})
+        serialized_lists = [shopping_list.serialize() for shopping_list in result]
+        return jsonify(serialized_lists)
 
 
 # Implement other API endpoints similarly...

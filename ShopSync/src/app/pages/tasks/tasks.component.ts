@@ -110,4 +110,28 @@ export class TasksComponent implements OnInit {
       },
     });
   }
+
+  loadShoppingList() {
+    // Implement logic to load shopping list from the cloud
+    console.log('Load Shopping List clicked');
+
+    this.shoppingListService.getShoppingListFromCloud(this.list_id).subscribe({
+      next: (data: any) => {
+        console.log('data', data);
+        this.generateDataSource(data);
+      },
+    });
+  }
+  
+  storeShoppingList() {
+    // Implement logic to store shopping list in the cloud
+    console.log('Store Shopping List clicked');
+
+    this.shoppingListService.storeShoppingListToCloud(this.list_id).subscribe({
+      next: (data: any) => {
+        console.log('data', data);
+        this.generateDataSource(data);
+      },
+    });
+  }
 }

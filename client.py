@@ -202,7 +202,7 @@ class Client:
                 self.shopping_lists.append(shopping_list_fetched)
                 print(f"Shopping list {shopping_list_fetched.name} added successfully!\n")
 
-            return True
+            return shopping_list_fetched
 
         else:
             print("Shopping list fetch failed")
@@ -210,11 +210,15 @@ class Client:
 
     def fetch_shopping_lists(self):
         result = True
+        shopping_lists = []
         for shopping_list in self.shopping_lists:
             if not self.fetch_shopping_list(shopping_list.id):
                 result = False
-        return result
-
+            else:
+                shopping_lists.append(shopping_list)
+        if not result and shopping_lists.__len__() == 0:
+            return result
+        return shopping_lists
 
     def delete_shopping_list(self, list_id):
         request = {
