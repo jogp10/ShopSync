@@ -3,19 +3,16 @@
 
   <div class="btn-group">
     <button class="btn btn-primary" (click)="loadShoppingList()" [disabled]="loading">
-      Sync with Cloud
+      <i class="fas fa-sync-alt"></i> Sync with Cloud
     </button>
 
     <button class="btn btn-primary" (click)="storeShoppingList()" [disabled]="loading">
-      Save to Cloud
+      <i class="fas fa-cloud-upload-alt"></i> Save to Cloud
     </button>
 
-    <!-- Loading indicator -->
-    <div *ngIf="loading" class="loading-container">
-      <div class="loading-indicator">
-        <i class="fas fa-spinner fa-spin"></i>
-      </div>
-    </div>
+    <span *ngIf="loading" class="loading-indicator">
+      <i class="fas fa-spinner fa-spin"></i>
+    </span>
   </div>
 </div>
 
