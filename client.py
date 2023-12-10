@@ -33,7 +33,7 @@ class Client:
         self.socket.connect(self.routers[self.router_nbr])
 
         self.shopping_lists = []
-        self.TIMEOUT = 7 #seconds
+        self.TIMEOUT = 3 #seconds
         self.SETTLE_DELAY = 2 #seconds
 
     def create_shopping_list(self, name: str, items: list[tuple[str, int]] = None):
