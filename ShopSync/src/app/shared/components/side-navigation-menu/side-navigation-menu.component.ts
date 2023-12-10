@@ -88,11 +88,34 @@ export class SideNavigationMenuComponent implements AfterViewInit, OnDestroy {
       text: 'Create New List',
       icon: 'plus',
       onClick: () => {
-        // Handle the click event to open the modal for creating a new list
-        // this.openCreateListModal();
-        console.log('Create New List');
+        // Use window.prompt to get the new list name from the user
+        const newListName = prompt('Enter the name for the new list:');
+        
+        // Check if the user entered a name
+        if (newListName !== null && newListName.trim() !== '') {
+          // Handle the click event to create the new list
+          console.log('Create New List:', newListName);
+    
+          // Call the service to create the new list
+          this.shoppingListService.createShoppingList(newListName).subscribe({
+            next: (data: any) => {
+              // Refresh the page
+              window.location.reload();
+    
+              // Notify the user after a short delay
+              setTimeout(() => {
+                notify('New shopping list created', 'success', 2000);
+              }, 500);
+            },
+            error: (error: any) => {
+              notify('Error creating new shopping list', 'error', 2000);
+              console.error('Error creating new shopping list', error);
+            },
+          });
+        }
       },
     };
+    
 
     // Add items for loading and syncing all lists
     const loadAllLists = {
