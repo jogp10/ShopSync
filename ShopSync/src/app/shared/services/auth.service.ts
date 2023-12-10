@@ -15,7 +15,7 @@ const defaultUser = {
 
 @Injectable()
 export class AuthService {
-  private _user: IUser | null = defaultUser;
+  private _user: IUser | null = null;
   private _user_: BehaviorSubject<IUser | null> = new BehaviorSubject<IUser | null>(null);
   get loggedIn(): boolean {
     return !!this._user;
@@ -30,7 +30,11 @@ export class AuthService {
     return this._user_.asObservable();
   }
 
-  constructor(private router: Router) { }
+  constructor(private router: Router) {
+    const storedUser = localStorage.getItem('user');
+    this._user = storedUser ? JSON.parse(storedUser): null;
+    this._user_.next(this._user || defaultUser);
+  }
 
   async logIn(email: string, password: string) {
 
@@ -38,6 +42,7 @@ export class AuthService {
       // Send request
       this._user = { ...defaultUser, email };
       this._user_.next(this._user || defaultUser);
+      localStorage.setItem('user', JSON.stringify(this._user));
 
       this.router.navigate([this._lastAuthenticatedPath]);
       return {
