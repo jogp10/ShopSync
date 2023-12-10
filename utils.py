@@ -42,6 +42,14 @@ class MessageType(StrEnum):
     HEALTH_CHECK_RESPONSE = 'HEALTH_CHECK_RESPONSE'
     ADD_NODE = 'ADD_NODE'
     REMOVE_NODE = 'REMOVE_NODE'
+    WRITE_HINT = 'WRITE_HINT'
+    WRITE_HINT_RESPONSE = 'WRITE_HINT_RESPONSE'
+    DELETE_HINT = 'DELETE_HINT'
+    DELETE_HINT_RESPONSE = 'DELETE_HINT_RESPONSE'
+    PUT_HANDED_OFF = 'PUT_HANDED_OFF'
+    PUT_HANDED_OFF_RESPONSE = 'PUT_HANDED_OFF_RESPONSE'
+    DELETE_HANDED_OFF = 'DELETE_HANDED_OFF'
+    DELETE_HANDED_OFF_RESPONSE = 'DELETE_HANDED_OFF_RESPONSE'
 
 
 def build_get_request(key, quorum_id=''):
@@ -187,13 +195,37 @@ def build_heartbeat_response():
         "type": MessageType.HEARTBEAT_RESPONSE,
     }
 
-# def build_quorum_failed_response(quorum_id):
-#     """return a json for a quorum failed response"""
-#     return {
-#         "type": MessageType.COORDINATE_PUT_RESPONSE,
-#         "result": False,
-#         "quorum_id": quorum_id
-#     }
+
+def build_write_hint_request(key, failed_node):
+    """return a json for a write hint request"""
+    return {
+        "type": MessageType.WRITE_HINT,
+        "key": key,
+        "node": failed_node
+    }
+
+def build_delete_hint_request(key, failed_node):
+    """return a json for a write hint request"""
+    return {
+        "type": MessageType.DELETE_HINT,
+        "key": key,
+        "node": failed_node
+    }
+
+def build_put_handed_off_request(key, value):
+    """return a json for a write hint request"""
+    return {
+        "type": MessageType.PUT_HANDED_OFF,
+        "key": key,
+        "value": value
+    }
+
+def build_delete_handed_off_request(key):
+    """return a json for a write hint request"""
+    return {
+        "type": MessageType.DELETE_HANDED_OFF,
+        "key": key
+    }
 
 
 def get_quorum_value(values, quorum_size):

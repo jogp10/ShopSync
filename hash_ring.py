@@ -8,7 +8,8 @@ class HashRing:
         self.ring = {}
         self.replica_count = replica_count
         self.sorted_keys = []
-        self.generate_ring(nodes)
+        self.nodes = set(nodes)
+        self.generate_ring(self.nodes)
 
     def generate_ring(self, nodes):
         for node in nodes:
@@ -21,6 +22,12 @@ class HashRing:
 
         # print(self.sorted_keys)
         # print(self.ring)
+
+    def get_all_nodes(self):
+        return list(self.nodes)
+
+    def get_other_nodes(self, node):
+        return [n for n in self.nodes if n != node]
 
     def get_node(self, string_key):
         """Given a string key a corresponding node in the hash ring is returned.
@@ -43,43 +50,70 @@ class HashRing:
         print(self.sorted_keys)
         return 0
 
-    def get_replica_nodes(self, primary_node, primary_node_position):
+    def get_replica_nodes(self, primary_node, primary_node_position, unhealthy_nodes=[]):
         if not self.ring:
             return []
 
+
         # skip the primary node
-        i = 0
-        j = 0
+        i = 0  # number of nodes found
+        j = 0  # number of nodes checked
+        failed_nodes = []
         replica_indices = []
         index = (primary_node_position + 1) % len(self.sorted_keys)
         while j < len(self.sorted_keys) and i < N:
             # get the node at the next index, clockwise
             next_node = self.ring[self.sorted_keys[index]]
             if next_node != primary_node:
-                replica_indices.append(index)
+                if next_node not in unhealthy_nodes:
+                    replica_indices.append(index)
+                else:
+                    failed_nodes.append(next_node)
                 i += 1
             index = (index + 1) % len(self.sorted_keys)
             j += 1
 
-        return [self.ring[self.sorted_keys[i]] for i in replica_indices]
+
+        substitute_nodes = []
+        if len(failed_nodes) > 0:
+            print(f"Unhealthy count: {len(failed_nodes)}")
+        #     start on the last replica index and gather the remaining nodes
+            index = replica_indices[-1]
+            while i < N and j < len(self.sorted_keys):
+                next_node = self.ring[self.sorted_keys[index]]
+                if next_node != primary_node:
+                    if next_node not in unhealthy_nodes:
+                        replica_indices.append(index)
+                        substitute_nodes.append(next_node)
+
+                    i += 1
+                index = (index + 1) % len(self.sorted_keys)
+                j += 1
+
+        return [self.ring[self.sorted_keys[i]] for i in replica_indices], failed_nodes, substitute_nodes
 
     def hash_key(self, key):
         return hashlib.sha256(key.encode()).hexdigest()
 
     def add_node(self, node):
-        # TODO probably more to do here
+        if node in self.nodes:
+            return
         for i in range(self.replica_count):
             key = self.get_node_key(node, i)
             self.ring[key] = node
             self.sorted_keys.append(key)
 
         self.sorted_keys.sort()
+        self.nodes.add(node)
 
     def remove_node(self, node):
+        if node not in self.nodes:
+            return
         for i in range(self.replica_count):
             key = self.get_node_key(node, i)
             del self.ring[key]
             self.sorted_keys.remove(key)
+        self.nodes.remove(node)
 
     def print_ring(self):
         print("Hash Ring:")

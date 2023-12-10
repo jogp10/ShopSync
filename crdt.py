@@ -1,7 +1,6 @@
 import json
 from typing import Dict
 from collections import defaultdict
-import ast
 
 ReplicaId = str
 
@@ -269,7 +268,11 @@ if __name__ == '__main__':
     gcounter = gcounter.inc('a', 5)
     gcounter = gcounter.inc('a', 5)
     print(gcounter.value())
-    gcounter2 = GCounter({'a': 12}, {'a': 4})
+    gcounter2 = GCounter({'a': 8}, {'a': 4})
     gcounter3 = gcounter.merge(gcounter2)
     gcounter3 = gcounter3.merge(gcounter2)
     print(gcounter3.value())
+#     write an example of 2 concorrent gcounters with 3 different replicas
+{'a': 5, 'b': 3, 'c': 2}
+{'a': 4, 'b': 3, 'c': 2}
+

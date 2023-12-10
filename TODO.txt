@@ -4,15 +4,13 @@ NOTA: há mais todos pelo código que não estão aqui
 - é sempre node_sockets[0] no node.py??
 
 HIGH:
-- hinted handoff
-- hinted handoff implica suspender nodes antes de os remover?
+- rebalance when adding new nodes, partilha de listas
 
 MEDIUM:
 - fazer merge nos writes?
 
 LOW:
 - para load balancing guardar histórico de nós requisitados?  e / ou ver um algoritmo de distribuição de carga. POUCO PRIORITÁRIO
-- transformar pedidos do cliente em ações (delete é um dec, etc...)
 - se é 0 não deve aparecer na lista
 
 - criar wrappers para send e receive
