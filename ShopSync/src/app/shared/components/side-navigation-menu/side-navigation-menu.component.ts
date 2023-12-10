@@ -118,6 +118,16 @@ export class SideNavigationMenuComponent implements AfterViewInit, OnDestroy {
 
 
     // Add items for loading and syncing all lists
+    const loadNewList = {
+      text: 'Sync New List',
+      icon: 'download',
+      onClick: () => {
+        // Handle the click event to load all lists
+        this.fetchNewList();
+      },
+    };
+
+    // Add items for loading and syncing all lists
     const loadAllLists = {
       text: 'Sync Lists',
       icon: 'download',
@@ -184,9 +194,10 @@ export class SideNavigationMenuComponent implements AfterViewInit, OnDestroy {
         text: 'Manage Lists',
         icon: 'preferences',
         items: [
-          createList, // Include the create list button
-          loadAllLists, // Include the load all lists button
-          syncAllLists, // Include the sync all lists button
+          createList,
+          loadNewList,
+          loadAllLists, 
+          syncAllLists,
         ],
       }
     ];
@@ -205,6 +216,25 @@ export class SideNavigationMenuComponent implements AfterViewInit, OnDestroy {
       },
     });
   }
+
+  fetchNewList() {
+    const listId = prompt('Enter the ID of the shopping list:');
+    if (listId) {
+        this.shoppingListService.getShoppingListFromCloud(listId).subscribe({
+            next: (success: any) => {
+                notify('Shopping list synced with cloud', 'success', 2000);
+                this.reloadAndGoToHome();
+            },
+            error: (error: any) => {
+                notify('Error syncing shopping list', 'error', 2000);
+                console.error('Error syncing shopping list', error);
+            },
+        });
+    } else {
+        // Handle case where user cancels the prompt
+        console.log('Fetching shopping list canceled');
+    }
+}
 
   storeAllLists() {
     this.shoppingListService.storeShoppingListsToCloud().subscribe({
