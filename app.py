@@ -1,10 +1,12 @@
 from flask import Flask, jsonify, request
 from flask_restx import Resource, Api, fields
+from flask_cors import CORS
 import socket
 import atexit
 
 app = Flask(__name__)
 api = Api(app)
+CORS(app) # Enable cors for all routes
 
 # Replace these import statements with your actual class definitions
 from client import Client, show_available_lists
@@ -94,7 +96,7 @@ class RetrieveMyShoppingLists(Resource):
     def get(self):
         shopping_lists = client.shopping_lists
         serialized_lists = [shopping_list.serialize() for shopping_list in shopping_lists]
-        return jsonify({'shopping_lists': serialized_lists})
+        return jsonify(serialized_lists)
 
 @shopping_list_ns.route('/<string:shopping_list_uuid>')
 class RetrieveItemsOfShoppingList(Resource):
@@ -111,7 +113,13 @@ class AddItemToShoppingList(Resource):
         data = request.json
         uuid = data.get('shopping_list_uuid')
         item = (data.get('item_name'), int(data.get('item_quantity', 1)))
-        result = client.add_item_to_shopping_list(uuid, item)
+        sl = next(filter(lambda x: x.id == uuid, client.shopping_lists), None)
+        # Check if item does not exist in shopping list
+        if sl.items.value(item[0]) == 0:
+            item = (item[0], item[1] - sl.items.value(item[0]))
+            result = client.change_item_quantity(uuid, item)
+        else:
+            result = client.add_item_to_shopping_list(uuid, item)
         return result.serialize()
     
 @shopping_list_ns.route('/item/delete')
@@ -133,6 +141,8 @@ class ChangeItemQuantityInShoppingList(Resource):
         data = request.json
         uuid = data.get('shopping_list_uuid')
         item = (data.get('item_name', 'default_item'), int(data.get('item_quantity', 0)))
+        sl = next(filter(lambda x: x.id == uuid, client.shopping_lists), None)
+        item = (item[0], item[1] - sl.items.value(item[0]))
         result = client.change_item_quantity(uuid, item)
         return result.serialize()
     
