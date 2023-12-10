@@ -3,6 +3,7 @@ import { DxTreeViewModule, DxTreeViewComponent, DxTreeViewTypes } from 'devextre
 import * as events from 'devextreme/events';
 import { ShoppingListService } from '../../services/shopping-list.service';
 import notify from 'devextreme/ui/notify';
+import { Router } from '@angular/router';
 
 @Component({
   selector: 'app-side-navigation-menu',
@@ -72,7 +73,7 @@ export class SideNavigationMenuComponent implements AfterViewInit, OnDestroy {
     }
   }
 
-  constructor(private elementRef: ElementRef, private shoppingListService: ShoppingListService) { }
+  constructor(private elementRef: ElementRef, private shoppingListService: ShoppingListService, private router: Router) { }
 
   onItemClick(event: DxTreeViewTypes.ItemClickEvent) {
     this.selectedItemChanged.emit(event);
@@ -117,10 +118,24 @@ export class SideNavigationMenuComponent implements AfterViewInit, OnDestroy {
       icon: 'trash',
       onClick: () => {
         // Show a confirmation message
-        if (confirm(`Are you sure you want to delete the list "${item.text}"?`)) {
+        if (confirm(`Are you sure you want to delete the list "${item.name}"?`)) {
           // Handle the click event to delete the list
-          console.log(`Delete List: ${item.text}`);
-          this.shoppingListService.deleteShoppingList(''); // Adjust this based on your service
+          console.log('Delete', item);
+          this.shoppingListService.deleteShoppingList(item.id).subscribe({
+            next: (data: any) => {
+              notify('Shopping list deleted, reloading', 'success', 2000);
+
+              // Notify the user after a short delay
+              setTimeout(() => {
+                window.location.reload();
+              }, 1000);
+            },
+            error: (error: any) => {
+              notify('Error deleting shopping list', 'error', 2000);
+              console.error('Error deleting shopping list', error);
+            },
+          });
+          // Adjust this based on your service
         }
       },
     });

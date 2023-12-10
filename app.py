@@ -74,10 +74,11 @@ class CreateShoppingList(Resource):
     @api.expect(create_shopping_list_model)
     def post(self):
         data = request.json
-        name = data.get('name')
+        name = data.get('shopping_list_name')
         items = [(item[0], int(item[1])) for item in data.get('items', [])]
         print(f"Received request to create shopping list with name {name} and items {items}")
         shopping_list = client.create_shopping_list(name, items)
+        print(f"Created shopping list {shopping_list.serialize()}")
         return jsonify({'message': 'Shopping list created successfully', 'shopping_list': shopping_list.serialize()})
 
 @shopping_list_ns.route('/delete')
