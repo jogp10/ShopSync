@@ -16,4 +16,12 @@ REM Sleep to allow time for nodes to start (adjust as needed)
 timeout /t 5 >nul
 
 REM Run server.py in a new terminal
-start cmd /c python server.py
+start cmd /c python router.py -p
+start cmd /c python router.py -b
+
+REM Sleep to allow time for nodes to start (adjust as needed)
+timeout /t 5 >nul
+
+REM Run client.py in a new terminal
+start cmd /c python client.py 1000
+```
