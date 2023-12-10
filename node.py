@@ -114,6 +114,8 @@ class DynamoNode:
             self.write_data(shopping_list["id"], ShoppingList.from_dict(shopping_list))
 
     def merge_shopping_lists(self, shopping_lists):
+        if len(shopping_lists) == 0:
+            return None
         list_id = shopping_lists[0].id
         list_name = shopping_lists[0].name
         merged_crdt = ShoppingListCRDT.zero()
@@ -248,15 +250,15 @@ class Node:
                 for node in self.write_hints.keys():
                     if self.write_hints.get(node, None) in healthy:
                         for key in self.write_hints[node]:
-                            self.send_push_message(self.node_sockets[0].IDENTITY, node,
+                            self.send_push_message(self.address, node,
                                                    json.dumps(build_put_handed_off_request(key,
-                                                   json.dumps(self.dynamo_node.read_data(key), default=lambda x: x.__dict__))))
+                                                  self.dynamo_node.read_data(key)), default=lambda x: x.__dict__))
                             self.delete_list_if_not_owned(key)
 
                 for node in self.delete_hints.keys():
                     if self.delete_hints.get(node, None) in healthy:
                         for key in self.delete_hints[node]:
-                            self.send_push_message(self.node_sockets[0].IDENTITY, node,
+                            self.send_push_message(self.address, node,
                                                    json.dumps(build_delete_handed_off_request(key)))
 
                 t = time.time()
@@ -288,29 +290,31 @@ class Node:
 
             case MessageType.ADD_NODE:
                 new_node = request['node']
-                self.dynamo_node.hash_ring.add_node(new_node)
+                if new_node not in self.dynamo_node.hash_ring.get_all_nodes():
 
-                # check if any lists are stored in this node that should be handed off
-                for key in self.dynamo_node.data.keys():
-                    if self.check_if_owned(key, new_node):
-                        self.send_push_message(self.node_sockets[0].IDENTITY, new_node,
-                                               json.dumps(build_put_handed_off_request(key,
-                                               json.dumps(self.dynamo_node.read_data(key), default=lambda x: x.__dict__))))
+                    self.dynamo_node.hash_ring.add_node(new_node)
 
-                    self.delete_list_if_not_owned(key)
+                    # check if any lists are stored in this node that should be handed off
+                    for key in self.dynamo_node.data.keys():
+                        if self.check_if_owned(key, new_node):
+                            self.send_push_message(self.address, new_node,
+                                                   json.dumps(build_put_handed_off_request(key,
+                                                   self.dynamo_node.read_data(key)), default=lambda x: x.__dict__))
 
-                healthy, _ = self.check_nodes_health(self.dynamo_node.hash_ring.get_other_nodes(self.address))
-                if self.write_hints.get(new_node, None) in healthy:
-                    for key in self.write_hints[new_node]:
-                        self.send_push_message(self.node_sockets[0].IDENTITY, new_node,
-                                               json.dumps(build_put_handed_off_request(key,
-                                               json.dumps(self.dynamo_node.read_data(key), default=lambda x: x.__dict__))))
                         self.delete_list_if_not_owned(key)
 
-                if self.delete_hints.get(new_node, None) in healthy:
-                    for key in self.delete_hints[new_node]:
-                        self.send_push_message(self.node_sockets[0].IDENTITY, new_node,
-                                               json.dumps(build_delete_handed_off_request(key)))
+                    healthy, _ = self.check_nodes_health(self.dynamo_node.hash_ring.get_other_nodes(self.address))
+                    if self.write_hints.get(new_node, None) in healthy:
+                        for key in self.write_hints[new_node]:
+                            self.send_push_message(self.address, new_node,
+                                                   json.dumps(build_put_handed_off_request(key,
+                                                   self.dynamo_node.read_data(key)), default=lambda x: x.__dict__))
+                            self.delete_list_if_not_owned(key)
+
+                    if self.delete_hints.get(new_node, None) in healthy:
+                        for key in self.delete_hints[new_node]:
+                            self.send_push_message(self.address, new_node,
+                                                   json.dumps(build_delete_handed_off_request(key)))
 
 
             case MessageType.REMOVE_NODE:
@@ -332,6 +336,11 @@ class Node:
     def send_push_message(self, sender_address, receiver_address, message):
         """sender_address comes already encoded"""
         print(f"Sending push message from {sender_address} to {receiver_address}: {message}")
+        # if sender_address is string, convert to bytes
+        if isinstance(sender_address, str):
+            sender_address = sender_address.encode('utf-8')
+        if isinstance(receiver_address, bytes):
+            receiver_address = receiver_address.decode('utf-8')
         push_socket = self.context.socket(zmq.PUSH)
         push_socket.connect(receiver_address)
         push_socket.send_multipart([sender_address, message.encode('utf-8')])
@@ -369,7 +378,7 @@ class Node:
                 current_quorum_state['retry_info'][node] += 1
                 current_quorum_state['last_retry_time'][node] = time.time()
 
-                self.send_push_message(self.node_sockets[0].IDENTITY, node,
+                self.send_push_message(self.address, node,
                                        json.dumps(request))
 
         result = current_quorum_state['responses'].copy()
@@ -393,7 +402,7 @@ class Node:
     def check_nodes_health(self, nodes):
         nodes_set = set(nodes)
         for node in nodes_set:
-            self.send_push_message(self.node_sockets[0].IDENTITY, node, json.dumps({"type": MessageType.HEALTH_CHECK}))
+            self.send_push_message(self.address, node, json.dumps({"type": MessageType.HEALTH_CHECK}))
 
         start_time = time.time()
         all_ok = False
@@ -404,6 +413,7 @@ class Node:
 
         if not all_ok:
             print("Some nodes are not healthy. Preparing for hinted handoff and marking as suspended.", file=sys.stderr)
+            print("Unhealthy nodes: ")
             [print(node) for node in nodes_set if not self.nodes_health.get(node, False)]
 
         healthy = []
@@ -420,8 +430,8 @@ class Node:
         # Send a HEALTH_CHECK message
         push_socket = self.context.socket(zmq.PUSH)
         push_socket.connect(node_address)
-        print([self.node_sockets[0].IDENTITY, json.dumps(message).encode('utf-8')])
-        push_socket.send_multipart([self.node_sockets[0].IDENTITY, json.dumps(message).encode('utf-8')])
+        print([self.address, json.dumps(message).encode('utf-8')])
+        push_socket.send_multipart([self.address, json.dumps(message).encode('utf-8')])
         push_socket.close()
 
         start_time = time.time()
@@ -467,7 +477,7 @@ class Node:
                         print(f"Failed count: {len(failed)}")
                         # send message to substitutes for the failed nodes
                         for idx, substitute in enumerate(substitutes[:len(failed)]):
-                            self.send_push_message(self.node_sockets[0].IDENTITY, substitute,
+                            self.send_push_message(self.address, substitute,
                                                    json.dumps(build_write_hint_request(key, failed[idx])))
 
 
@@ -523,7 +533,10 @@ class Node:
                     else:
                         shopping_lists = [ShoppingList.from_dict(json.loads(shopping_list)) for shopping_list in result]
                         merged_shopping_list = self.dynamo_node.merge_shopping_lists(shopping_lists)
-                        result = json.dumps(merged_shopping_list, default=lambda x: x.__dict__)
+                        if merged_shopping_list is None:
+                            result = False
+                        else:
+                            result = json.dumps(merged_shopping_list, default=lambda x: x.__dict__)
                     print("Result  after quorum consensus: ", result)
 
                     response_to_router = build_quorum_get_response(quorum_id, result)
@@ -543,13 +556,13 @@ class Node:
                         self.dynamo_node.hash_ring.get_other_nodes(self.address))
                     replicas, failed, substitutes = self.dynamo_node.hash_ring.get_replica_nodes(primary_node,
                                                                                                  primary_node_index,
-                                                                                                 unhealthy, key)
+                                                                                                 unhealthy)
 
                     if len(failed) > 0:
                         print(f"Failed count: {len(failed)}")
                         # send message to substitutes for the failed nodes
                         for idx, substitute in enumerate(substitutes[:len(failed)]):
-                            self.send_push_message(self.node_sockets[0].IDENTITY, substitute,
+                            self.send_push_message(self.address, substitute,
                                                    json.dumps(build_delete_hint_request(key, failed[idx])))
 
                     request_to_replicas = build_delete_request(key, quorum_id)
@@ -597,7 +610,7 @@ class Node:
             "address": self.address,
             "quorum_id": json_request['quorum_id']
         }
-        self.send_push_message(self.node_sockets[0].IDENTITY, sender_identity.decode('utf-8'), json.dumps(response))
+        self.send_push_message(self.address, sender_identity, json.dumps(response))
 
     def listen_for_nodes(self):
         """Messages from other nodes, get, put, delete received from a coordinator or the coordinator itself receives _responses"""
@@ -660,7 +673,7 @@ class Node:
                 case MessageType.HEALTH_CHECK:
                     # If a HEALTH_CHECK message is received, send a HEALTH_CHECK_RESPONSE message
                     response = {"type": MessageType.HEALTH_CHECK_RESPONSE}
-                    self.send_push_message(self.node_sockets[0].IDENTITY, sender_identity.decode('utf-8'),
+                    self.send_push_message(self.address, sender_identity,
                                            json.dumps(response))
                     continue
 

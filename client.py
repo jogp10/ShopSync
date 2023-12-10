@@ -212,17 +212,19 @@ class Client:
             if index != -1:
                 # merge the shopping list
                 self.shopping_lists[index] = self.merge_shopping_lists([self.shopping_lists[index], shopping_list_fetched])
+                self.update_negative_quantities(self.shopping_lists[index])
                 print(f"Shopping list {shopping_list_fetched.name} updated successfully!\n")
             else:
                 # append the shopping list
                 self.shopping_lists.append(shopping_list_fetched)
+                self.update_negative_quantities(shopping_list_fetched)
                 print(f"Shopping list {shopping_list_fetched.name} added successfully!\n")
 
             return shopping_list_fetched
 
         else:
-            print("Shopping list fetch failed")
-            raise ShoppingListStorageError("Failed to connect to the router for shopping list fetch.")
+            print("Shopping list fetch failed", file=sys.stderr)
+            # raise ShoppingListStorageError("Failed to connect to the router for shopping list fetch.")
 
     def fetch_shopping_lists(self):
         result = True
@@ -277,7 +279,7 @@ class Client:
         return shopping_list
     
     def change_item_quantity(self, list_id, item):
-        shopping_list = next(filter(lambda x: x.id == list_id, self.shopping_lists), None)
+        shopping_list: ShoppingList = next(filter(lambda x: x.id == list_id, self.shopping_lists), None)
 
         if shopping_list is None:
             print("Shopping list does not exist")
@@ -286,6 +288,13 @@ class Client:
         shopping_list.change_item_quantity(item, self.username)
 
         return shopping_list
+
+    def update_negative_quantities(self, shopping_list: ShoppingList):
+        for item in shopping_list.items.counters:
+            value = shopping_list.items.value(item)
+            if value < 0:
+                shopping_list.items = shopping_list.items.inc(item, self.username, -value)
+
 
 def ask_for_items():
     items = []

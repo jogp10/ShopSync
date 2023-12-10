@@ -46,7 +46,10 @@ class ShoppingList:
         elif item[1] > 0:
             self.items = self.items.inc(item[0], replica_id, item[1])
         else:
-            self.items = self.items.dec(item[0], replica_id, -item[1])
+            if self.items.value(item[0]) + item[1] < 0:
+                self.items = self.items.dec(item[0], replica_id, self.items.value(item[0]))
+            else:
+                self.items = self.items.dec(item[0], replica_id, -item[1])
 
     def get_number_of_items(self):
         return len(self.items.counters)

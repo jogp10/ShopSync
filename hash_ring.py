@@ -76,7 +76,7 @@ class HashRing:
         if len(failed_nodes) > 0:
             print(f"Unhealthy count: {len(failed_nodes)}")
         #     start on the last replica index and gather the remaining nodes
-            index = replica_indices[-1]
+            index = replica_indices[-1] if len(replica_indices) > 0 else (primary_node_position + 1) % len(self.sorted_keys)
             while i < N and j < len(self.sorted_keys):
                 next_node = self.ring[self.sorted_keys[index]]
                 if next_node != primary_node:

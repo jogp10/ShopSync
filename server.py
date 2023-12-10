@@ -266,8 +266,8 @@ class Router:
 
         type_request = json_request['type']
 
-        if type_request == MessageType.REGISTER:
-            self.fsm.event = NODE_REGISTER
+        if type_request == MessageType.REGISTER or type_request == MessageType.HEARTBEAT_RESPONSE:
+            self.fsm.event = NODE_MESSAGE
         else:
             self.fsm.event = CLIENT_REQUEST
 
@@ -275,6 +275,7 @@ class Router:
             run_fsm(self.fsm)
 
             if json_request['type'] not in client_request_types and json_request['type'] != MessageType.REGISTER:
+                print(self.activity)
                 if identity.decode('utf-8') in self.activity:
                     self.activity[identity.decode('utf-8')]['last_time_active'] = time.time()
                     self.activity[identity.decode('utf-8')]['immediately_available'] = True
@@ -287,6 +288,7 @@ class Router:
             elif json_request['type'] != MessageType.HEARTBEAT_RESPONSE:
                 self.tasks_queue.put(json_request)
         except BStarException:
+            print("BStarException")
             pass
 
 
