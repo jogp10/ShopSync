@@ -121,7 +121,14 @@ export class TasksComponent implements OnInit {
       },
 
       error: (error: any) => {
-        notify('Error loading shopping list from cloud', 'error', 2000);
+        if (error.status === 502) {
+          notify('Sync Failed: Shopping list not stored in cloud', 'warning', 2000);
+        } else if (error.status === 503) {
+          notify('Service Unavailable - Error syncing shopping list', 'error', 2000);
+        } else {
+          notify('Error syncing shopping list', 'error', 2000);
+        }
+        console.error('Error syncing shopping list', error);
         this.loading = false;
       }
     });

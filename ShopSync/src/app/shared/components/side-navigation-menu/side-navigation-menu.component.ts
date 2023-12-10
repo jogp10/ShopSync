@@ -226,8 +226,12 @@ export class SideNavigationMenuComponent implements AfterViewInit, OnDestroy {
                 this.reloadAndGoToHome();
             },
             error: (error: any) => {
+              if (error.status === 503) {
+                notify('Service Unavailable - Error syncing shopping list', 'error', 2000);
+              } else {
                 notify('Error syncing shopping list', 'error', 2000);
-                console.error('Error syncing shopping list', error);
+              }
+              console.error('Error syncing shopping list', error);
             },
         });
     } else {

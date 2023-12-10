@@ -9,7 +9,7 @@ api = Api(app)
 CORS(app) # Enable cors for all routes
 
 # Replace these import statements with your actual class definitions
-from client import Client, show_available_lists, ShoppingListStorageError
+from client import Client, show_available_lists, ShoppingListStorageError, ShoppingListNotFoundError
 from utils import ROUTER_ADDRESS, ROUTER_BACKUP_ADDRESS
 
 def find_available_port():
@@ -191,6 +191,9 @@ class LoadShoppingList(Resource):
             return result.serialize()
         except ShoppingListStorageError as e:
             abort(503, description="Failed to connect to the server. Service temporarily unavailable.")
+        except ShoppingListNotFoundError as e:
+            abort(502, description="Shopping list not in cloud.")
+
     
 @shopping_list_ns.route('/load_all')
 class LoadAllShoppingLists(Resource):

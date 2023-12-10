@@ -161,10 +161,6 @@ class Client:
     def store_shopping_list_online(self, list_id):
         shopping_list = next(filter(lambda x: x.id == list_id, self.shopping_lists), None)
 
-        if shopping_list is None:
-            print("Shopping list not found")
-            raise ShoppingListNotFoundError("Shopping list not found")
-
         request = {
             "type": MessageType.PUT,
             "key": shopping_list.id,
@@ -187,18 +183,19 @@ class Client:
                 self.store_shopping_list_online(shopping_list.id)
             except ShoppingListStorageError as e:
                 raise e
-            except ShoppingListNotFoundError as e:
-                result = False
-                pass
         return result
 
     def fetch_shopping_list(self, list_id):
+        print("here--- ", file=sys.stderr)
+
         request = {
             "type": MessageType.GET,  # :()
             "key": list_id
         }
 
         response = self.send_message_to_router(request)
+        print("testeresponse: ", file=sys.stderr)
+        print(response, file=sys.stderr)
 
         if response:
             print("Shopping list fetched successfully")
@@ -224,18 +221,19 @@ class Client:
 
         else:
             print("Shopping list fetch failed", file=sys.stderr)
-            # raise ShoppingListStorageError("Failed to connect to the router for shopping list fetch.")
+            if response == False:
+                raise ShoppingListNotFoundError("Shopping list not yet on cloud")
+            raise ShoppingListStorageError("Failed to connect to the router for shopping list fetch.")
 
     def fetch_shopping_lists(self):
-        result = True
         shopping_lists = []
         for shopping_list in self.shopping_lists:
-            if not self.fetch_shopping_list(shopping_list.id):
-                result = False
-            else:
-                shopping_lists.append(shopping_list)
-        if not result and shopping_lists.__len__() == 0:
-            return result
+            try:
+                self.fetch_shopping_list(shopping_list.id)
+            except ShoppingListNotFoundError as e:
+                pass
+            except ShoppingListStorageError as e:
+                raise e
         return shopping_lists
 
     def delete_shopping_list(self, list_id):
