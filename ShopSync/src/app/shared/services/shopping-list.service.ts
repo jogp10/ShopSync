@@ -51,6 +51,7 @@ export class ShoppingListService {
     return this.http.post<any>(`${this.apiUrl}item/delete`, data);
   }
 
+  // TODO: Implement the following methods on frontend
   getShoppingListFromCloud(shoppingListUuid: string): Observable<any> {
     const data = {
       shopping_list_uuid: shoppingListUuid,
