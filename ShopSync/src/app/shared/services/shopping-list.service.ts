@@ -1,14 +1,22 @@
 import { Injectable } from '@angular/core';
 import { HttpClient } from '@angular/common/http';
 import { Observable, catchError, map, of } from 'rxjs';
+import { AuthService } from './auth.service';
 
 @Injectable({
   providedIn: 'root'
 })
 export class ShoppingListService {
-  private apiUrl = 'http://127.0.0.1:5000/shopping_list/';
+  private apiUrl: string = 'http://127.0.0.1:5000/shopping_list/';
 
-  constructor(private http: HttpClient) {}
+  constructor(private http: HttpClient, private authService: AuthService) {
+    this.authService.user$.subscribe(user => {
+      if (user) {
+        const userPort = user.email.split('@')[0];
+        this.apiUrl = `http://127.0.0.1:${userPort}/shopping_list/`;
+      }
+    });
+  }
 
   getShoppingLists(): Observable<any> {
     return this.http.get<any>(this.apiUrl);

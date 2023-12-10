@@ -1,5 +1,6 @@
 import { Injectable } from '@angular/core';
 import { CanActivate, Router, ActivatedRouteSnapshot } from '@angular/router';
+import { BehaviorSubject } from 'rxjs';
 
 export interface IUser {
   email: string;
@@ -8,13 +9,14 @@ export interface IUser {
 
 const defaultPath = '/';
 const defaultUser = {
-  email: 'sandra@example.com',
+  email: '5000@example.com',
   avatarUrl: 'https://js.devexpress.com/Demos/WidgetsGallery/JSDemos/images/employees/06.png'
 };
 
 @Injectable()
 export class AuthService {
   private _user: IUser | null = defaultUser;
+  private _user_: BehaviorSubject<IUser | null> = new BehaviorSubject<IUser | null>(null);
   get loggedIn(): boolean {
     return !!this._user;
   }
@@ -24,6 +26,10 @@ export class AuthService {
     this._lastAuthenticatedPath = value;
   }
 
+  get user$() {
+    return this._user_.asObservable();
+  }
+
   constructor(private router: Router) { }
 
   async logIn(email: string, password: string) {
@@ -31,8 +37,9 @@ export class AuthService {
     try {
       // Send request
       this._user = { ...defaultUser, email };
-      this.router.navigate([this._lastAuthenticatedPath]);
+      this._user_.next(this._user || defaultUser);
 
+      this.router.navigate([this._lastAuthenticatedPath]);
       return {
         isOk: true,
         data: this._user
@@ -114,7 +121,12 @@ export class AuthService {
 
   async logOut() {
     this._user = null;
+    this._user_.next(defaultUser);
     this.router.navigate(['/login-form']);
+  }
+
+  getUserEmail(): string {
+    return this._user_.value ? this._user_.value.email : '';
   }
 }
 

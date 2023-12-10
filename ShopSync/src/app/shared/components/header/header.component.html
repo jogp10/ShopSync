@@ -17,7 +17,7 @@
       *ngIf="title"
       [text]="title">
     </dxi-item>
-    <!-- <dxi-item
+    <dxi-item
       location="after"
       locateInMenu="auto"
       menuItemTemplate="menuItem">
@@ -35,6 +35,6 @@
     </dxi-item>
     <div *dxTemplate="let data of 'menuItem'">
       <app-user-panel [user]="user" [menuItems]="userMenuItems" menuMode="list"></app-user-panel>
-    </div> -->
+    </div>
   </dx-toolbar>
 </header>
