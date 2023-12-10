@@ -34,9 +34,11 @@ class DynamoNode:
         self.dirty.pop(list_id, None)
 
     def write_data(self, list_id, shopping_list: ShoppingList):
+        if not shopping_list:
+            return False
         self.dirty[list_id] = True
         upsert_list(list_id, shopping_list, self.data)
-        return True  # False if errors?
+        return True
 
     def read_data(self, list_id):
         if self.data.get(list_id) is None:
@@ -181,6 +183,7 @@ class Node:
         self.context = zmq.Context()
         self.poller = zmq.Poller()
         self.node_sockets = [""] * len(router_addresses)
+        self.address = node_address
 
         for i in range(len(router_addresses)):
             self.node_sockets[i] = self.context.socket(zmq.DEALER)
@@ -204,6 +207,9 @@ class Node:
         self.dynamo_node = DynamoNode(node_address)
 
         self.nodes_health = {}
+        self.write_hints = {}
+        self.delete_hints = {}
+
 
     def start(self):
         self.dynamo_node.get_database_data()
@@ -217,6 +223,10 @@ class Node:
         reply_thread = threading.Thread(target=self.listen_for_nodes)
         reply_thread.start()
 
+        #every 15 seconds so as to handoff stored hints
+
+        t = time.time()
+
         # Start listening for messages from the ROUTER
         while True:
             try:
@@ -228,9 +238,32 @@ class Node:
             for socket in self.node_sockets:
                 if (socks.get(socket) == zmq.POLLIN):
                     self.handle_server_request(socket)
+
+            if time.time() - t > 15:
+                # set of keys in both dicts
+                failed_nodes = set(self.write_hints.keys()) & set(self.delete_hints.keys())
+                # check health of failed nodes
+                healthy, unhealthy = self.check_nodes_health(failed_nodes)
+                #check for hints
+                for node in self.write_hints.keys():
+                    if self.write_hints.get(node, None) in healthy:
+                        for key in self.write_hints[node]:
+                            self.send_push_message(self.node_sockets[0].IDENTITY, node,
+                                                   json.dumps(build_put_handed_off_request(key,
+                                                   json.dumps(self.dynamo_node.read_data(key), default=lambda x: x.__dict__))))
+                            self.delete_list_if_not_owned(key)
+
+                for node in self.delete_hints.keys():
+                    if self.delete_hints.get(node, None) in healthy:
+                        for key in self.delete_hints[node]:
+                            self.send_push_message(self.node_sockets[0].IDENTITY, node,
+                                                   json.dumps(build_delete_handed_off_request(key)))
+
+                t = time.time()
+
             
-            if(socks.get(self.reply_socket) == zmq.POLLIN):
-                self.handle_request(socket)
+            # if(socks.get(self.reply_socket) == zmq.POLLIN): This is done in its own thread?? Here it may receive a message that can not be handled by handle_request
+            #     self.handle_request(socket)
 
     def handle_server_request(self, socket):
 
@@ -251,15 +284,43 @@ class Node:
                 self.coordinated_quorums_queue.put(request)
 
             case MessageType.REGISTER_RESPONSE:
-                self.dynamo_node.hash_ring = HashRing([self.node_sockets[0].IDENTITY.decode('utf-8')] + request['nodes'])
+                self.dynamo_node.hash_ring = HashRing([self.address] + request['nodes'])
 
             case MessageType.ADD_NODE:
-                self.dynamo_node.hash_ring.add_node(request['node'])
+                new_node = request['node']
+                self.dynamo_node.hash_ring.add_node(new_node)
+
+                # check if any lists are stored in this node that should be handed off
+                for key in self.dynamo_node.data.keys():
+                    if self.check_if_owned(key, new_node):
+                        self.send_push_message(self.node_sockets[0].IDENTITY, new_node,
+                                               json.dumps(build_put_handed_off_request(key,
+                                               json.dumps(self.dynamo_node.read_data(key), default=lambda x: x.__dict__))))
+
+                    self.delete_list_if_not_owned(key)
+
+                healthy, _ = self.check_nodes_health(self.dynamo_node.hash_ring.get_other_nodes(self.address))
+                if self.write_hints.get(new_node, None) in healthy:
+                    for key in self.write_hints[new_node]:
+                        self.send_push_message(self.node_sockets[0].IDENTITY, new_node,
+                                               json.dumps(build_put_handed_off_request(key,
+                                               json.dumps(self.dynamo_node.read_data(key), default=lambda x: x.__dict__))))
+                        self.delete_list_if_not_owned(key)
+
+                if self.delete_hints.get(new_node, None) in healthy:
+                    for key in self.delete_hints[new_node]:
+                        self.send_push_message(self.node_sockets[0].IDENTITY, new_node,
+                                               json.dumps(build_delete_handed_off_request(key)))
 
 
             case MessageType.REMOVE_NODE:
                 self.dynamo_node.hash_ring.remove_node(request['node'])
+            #     remove from hints if present
+                self.write_hints.pop(request['node'], None)
+                self.delete_hints.pop(request['node'], None)
 
+            #     delete any nodes from this dynamo node that are not owned
+        # TODO when a node is deleted each node can be entitle to more lists, is this feasible?
 
             case MessageType.HEARTBEAT:
                 response = {
@@ -267,8 +328,6 @@ class Node:
                     "address": socket.IDENTITY.decode('utf-8')
                 }
                 socket.send_json(response)
-
-
 
     def send_push_message(self, sender_address, receiver_address, message):
         """sender_address comes already encoded"""
@@ -297,7 +356,6 @@ class Node:
             current_quorum_state = self.delete_quorum_requests_state[quorum_id]
 
         start_time = time.time()
-        # TODO should the condition be the length of the most common response?
         while time.time() - start_time < timeout and len(current_quorum_state['responses']) < quorum_size:
             for node in nodes:
                 if not any([current_quorum_state['retry_info'][node] <= max_retries for node in nodes]):
@@ -345,7 +403,6 @@ class Node:
                 break
 
         if not all_ok:
-
             print("Some nodes are not healthy. Preparing for hinted handoff and marking as suspended.", file=sys.stderr)
             [print(node) for node in nodes_set if not self.nodes_health.get(node, False)]
 
@@ -357,9 +414,7 @@ class Node:
         return healthy, unhealthy
 
     def check_node_health(self, node_address):
-
-        # todo just send an heartbeat outside the message to all nodes and then check if valid
-
+        """UNUSED"""
         # Create a message
         message = {"type": MessageType.HEALTH_CHECK}
         # Send a HEALTH_CHECK message
@@ -380,7 +435,6 @@ class Node:
                     return False
                 else:
                     continue
-        # TODO: Implement hinted handoff and mark node as suspended
 
         print(f"Node {node_address} is healthy.")
 
@@ -400,11 +454,24 @@ class Node:
                     value = task["value"]
                     primary_node, primary_node_index = self.dynamo_node.hash_ring.get_node(key)
 
-                    if primary_node != self.node_sockets[0].IDENTITY.decode('utf-8'):
+                    if primary_node != self.address:
                         print("I am not the primary node for this key", file=sys.stderr)
-                        #todo send to primary node sometime or update hashring??
+                        # redirect request
+                        # todo send to primary node sometime or update hashring??
 
-                    replicas = self.dynamo_node.hash_ring.get_replica_nodes(primary_node, primary_node_index)
+
+                    healthy, unhealthy = self.check_nodes_health(self.dynamo_node.hash_ring.get_other_nodes(self.address))
+                    replicas, failed, substitutes = self.dynamo_node.hash_ring.get_replica_nodes(primary_node, primary_node_index, unhealthy)
+
+                    if len(failed) > 0:
+                        print(f"Failed count: {len(failed)}")
+                        # send message to substitutes for the failed nodes
+                        for idx, substitute in enumerate(substitutes[:len(failed)]):
+                            self.send_push_message(self.node_sockets[0].IDENTITY, substitute,
+                                                   json.dumps(build_write_hint_request(key, failed[idx])))
+
+
+
                     server_socket = task["origin"]
                     request_to_replicas = build_put_request(key, value, quorum_id)
 
@@ -429,11 +496,16 @@ class Node:
 
                     primary_node, primary_node_index = self.dynamo_node.hash_ring.get_node(key)
 
-                    if primary_node != self.node_sockets[0].IDENTITY.decode('utf-8'):
+                    if primary_node != self.address:
                         print("I am not the primary node for this key", file=sys.stderr)
                         # todo send to primary node sometime or update hashring??
 
-                    replicas = self.dynamo_node.hash_ring.get_replica_nodes(primary_node, primary_node_index)
+                    healthy, unhealthy = self.check_nodes_health(
+                        self.dynamo_node.hash_ring.get_other_nodes(self.address))
+                    replicas, failed, substitutes = self.dynamo_node.hash_ring.get_replica_nodes(primary_node,
+                                                                                                 primary_node_index,
+                                                                                                 unhealthy)
+
 
                     server_socket = task["origin"]
                     request_to_replicas = build_get_request(key, quorum_id)
@@ -445,7 +517,7 @@ class Node:
                     print(tmp_result)
                     # exclude Nones from the list
                     result = [item for item in tmp_result if item is not None]
-                    quorum_size = min(R_QUORUM, len(set(replicas)) + 1)
+                    quorum_size = min(R_QUORUM, len(set(replicas)) + 1 - len(failed))  # there is no guarantee that the failed nodes will be able to reply
                     if len(result) < quorum_size:
                         result = False
                     else:
@@ -463,11 +535,22 @@ class Node:
 
                     primary_node, primary_node_index = self.dynamo_node.hash_ring.get_node(key)
 
-                    if primary_node != self.node_sockets[0].IDENTITY.decode('utf-8'):
+                    if primary_node != self.address:
                         print("I am not the primary node for this key", file=sys.stderr)
                         # todo send to primary node sometime or update hashring??
 
-                    replicas = self.dynamo_node.hash_ring.get_replica_nodes(primary_node, primary_node_index)
+                    healthy, unhealthy = self.check_nodes_health(
+                        self.dynamo_node.hash_ring.get_other_nodes(self.address))
+                    replicas, failed, substitutes = self.dynamo_node.hash_ring.get_replica_nodes(primary_node,
+                                                                                                 primary_node_index,
+                                                                                                 unhealthy, key)
+
+                    if len(failed) > 0:
+                        print(f"Failed count: {len(failed)}")
+                        # send message to substitutes for the failed nodes
+                        for idx, substitute in enumerate(substitutes[:len(failed)]):
+                            self.send_push_message(self.node_sockets[0].IDENTITY, substitute,
+                                                   json.dumps(build_delete_hint_request(key, failed[idx])))
 
                     request_to_replicas = build_delete_request(key, quorum_id)
 
@@ -476,14 +559,16 @@ class Node:
                                                                       R_QUORUM))
 
                     print(result)
-                    quorum_size = min(R_QUORUM, len(set(replicas)) + 1)
+                    quorum_size = min(R_QUORUM, len(set(replicas)) + 1 - len(failed))  # there is no guarantee that the substitute nodes had the list
                     if len(result) < quorum_size:
                         result = False
                     else:
                         result = True
 
+                    server_socket = task["origin"]
                     response_to_router = build_quorum_delete_response(quorum_id, result)
                     server_socket.send_json(response_to_router)
+
 
     def handle_request_response(self, request_type_quorums_state, json_request):
         request_id = json_request['quorum_id']
@@ -509,19 +594,15 @@ class Node:
             "type": message_type + "_RESPONSE",
             "key": key,
             "value": value,
-            "address": self.node_sockets[0].IDENTITY.decode('utf-8'),
+            "address": self.address,
             "quorum_id": json_request['quorum_id']
         }
         self.send_push_message(self.node_sockets[0].IDENTITY, sender_identity.decode('utf-8'), json.dumps(response))
 
     def listen_for_nodes(self):
-        print("listening for nodes")
         """Messages from other nodes, get, put, delete received from a coordinator or the coordinator itself receives _responses"""
-        i = 0
-        node_address = self.reply_socket.IDENTITY
+        print("listening for nodes")
         while True:
-            # if i > 5:
-            #     break
             sender_identity, message = self.reply_socket.recv_multipart()
             json_request = json.loads(message)
             print(sender_identity)
@@ -553,6 +634,29 @@ class Node:
                     self.handle_request(MessageType.DELETE, json_request, sender_identity)
                     continue
 
+                case MessageType.WRITE_HINT:
+                    # store the hint
+                    key = json_request['key']
+                    node = json_request['node']
+                    upsert_list(node, key, self.write_hints)
+
+                case MessageType.DELETE_HINT:
+                    # store the hint
+                    key = json_request['key']
+                    node = json_request['node']
+                    upsert_list(node, key, self.delete_hints)
+
+                case MessageType.PUT_HANDED_OFF:
+                    key = json_request['key']
+                    value = json_request['value']
+                    self.dynamo_node.write_data(key, ShoppingList.from_dict(json.loads(value)))
+                    continue
+
+                case MessageType.DELETE_HANDED_OFF:
+                    key = json_request['key']
+                    self.dynamo_node.delete_data(key)
+                    continue
+
                 case MessageType.HEALTH_CHECK:
                     # If a HEALTH_CHECK message is received, send a HEALTH_CHECK_RESPONSE message
                     response = {"type": MessageType.HEALTH_CHECK_RESPONSE}
@@ -563,6 +667,33 @@ class Node:
                 case MessageType.HEALTH_CHECK_RESPONSE:
                     self.nodes_health[sender_identity.decode('utf-8')] = True
                     continue
+
+    def update_health_statuses(self, healthy, unhealthy):
+        for node in unhealthy:
+            self.nodes_health[node] = False
+
+        for node in healthy:
+            if not self.nodes_health.get(node, False):
+            #     todo send it any missing lists stored in this nodes hinted handoff
+                pass
+            self.nodes_health[node] = True
+
+    def get_unhealthy_nodes(self, nodes):
+        return [node for node in nodes if not self.nodes_health.get(node, False)]
+
+    def delete_list_if_not_owned(self, key):
+        primary_node, primary_node_pos = self.dynamo_node.hash_ring.get_node(key)
+        replicas = self.dynamo_node.hash_ring.get_ideal_replica_nodes(primary_node, primary_node_pos)
+        if self.address not in replicas:
+            self.dynamo_node.delete_data(key)
+
+    def check_if_owned(self, key, node=None):
+        if node is None:
+            node = self.address
+        primary_node, primary_node_pos = self.dynamo_node.hash_ring.get_node(key)
+        replicas = self.dynamo_node.hash_ring.get_ideal_replica_nodes(primary_node, primary_node_pos)
+        return node in replicas
+
 
 
 if __name__ == "__main__":

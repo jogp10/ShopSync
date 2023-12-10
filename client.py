@@ -340,6 +340,7 @@ if __name__ == "__main__":
     #ensure that at exit always do a local save
     atexit.register(client.save_database_data)
 
+
     while True:
         print("1. Create Shopping List")
         print("2. Add Item to Shopping List")

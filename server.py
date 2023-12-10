@@ -40,8 +40,6 @@ class Router:
             self.local_socket = ROUTER_BACKUP_ADDRESS_LOCAL_PEER
             self.remote_socket = ROUTER_BACKUP_ADDRESS_REMOTE_PEER
 
-        self.sockets = {}
-        self.threads = {}
         self.nodes = nodes
         self.activity = {}  # for heartbeats and potentially other things
         self.hash_ring = HashRing(nodes, replica_count)
@@ -50,12 +48,10 @@ class Router:
 
         # states of the quorums that have been forwarded to the nodes
         self.forwarded_read_quorums = {}  # a dictionary of quorum_id -> dictionary of node -> number of tries
-        self.forwarded_write_quorums = {}  # a dictionary of quorum_id -> dictionary of node -> number of tries, however
-        self.forwarded_delete_quorums = {}  # a dictionary of quorum_id -> dictionary of node -> number of tries, however
-        # forwarded_write_quorums[quroum_id][client_address]  is the address of the client that sent the request
+        self.forwarded_write_quorums = {}  # a dictionary of quorum_id -> dictionary of node -> number of tries
+        self.forwarded_delete_quorums = {}  # a dictionary of quorum_id -> dictionary of node -> number of tries
         # todo maybe store which nodes are busy at the moment
 
-        # hinted hand-off todo
 
         #ROUTER ATTR
         self.statepub = self._context.socket(zmq.PUB)
@@ -296,7 +292,7 @@ class Router:
 
     def _process_request(self, key, value, client_address, request_type):
         primary_node, pos = self.hash_ring.get_node(key)
-        replicas = self.hash_ring.get_replica_nodes(primary_node, pos)
+        replicas = self.hash_ring.get_replica_nodes(primary_node, pos)[0]
         coordinator = self.elect_coordinator(primary_node, replicas)
 
         if coordinator is None:
